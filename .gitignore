@@ -1,0 +1,9 @@
+.venv/
+.cache/
+.claude/
+__pycache__/
+.DS_Store
+# prep.py output of real songs is copyrighted audio: only the generated test song is committed
+songs/*
+!songs/synth-test/
+!songs/index.json
