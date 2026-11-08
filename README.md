@@ -42,6 +42,8 @@ The first song you add downloads the ~180 MB separation model once.
 
 Space or Esc pauses the song. Resume with Space/Enter and a three-second count-in, restart with R, or return to song selection with Esc. Switching tabs pauses automatically.
 
+Hits outside the perfect window show how many milliseconds early or late they were. Results show average signed timing overall and per instrument; AUTO notes are excluded.
+
 You can move onto captured (AUTO) tracks and back out again; silent tracks are skipped.
 
 The title screen also works with the mouse: click a song to select it and again to play, or click the buttons.
