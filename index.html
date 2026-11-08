@@ -804,8 +804,8 @@ function frame() {
 }
 
 // ---------- rendering ----------
-// The highway bends: offsets grow with the square of distance ahead, so the hit line never moves and only the road ahead sways.
-function P(x, dt) { const s = F / (F + Math.max(dt, -.35)), c = (Math.max(0, dt) / LOOK) ** 2;
+// Bend in projected depth: fixed at the hit line, bounded at the horizon.
+function P(x, dt) { const s = F / (F + Math.max(dt, -.35)), c = Math.max(0, 1 - s) ** 2;
   return [W / 2 + (x - camX) * s + bendX * c, HZ + (HIT_Y - HZ) * s - bendY * c]; }
 const steps = (d0, d1) => Math.max(1, Math.ceil(Math.abs(d1 - d0) / .2)); // long spans are drawn in pieces so they curve
 function quad(x0, x1, d0, d1) { const n = steps(d0, d1); g.beginPath();
@@ -872,12 +872,6 @@ function materialTexture(style = theme) {
   }
   materialCache.set(style, canvas); return canvas;
 }
-function clipScenery(vx, vy) {
-  // Reserve the centre for the highway: texture and effects belong to the sky and verges.
-  g.beginPath(); g.rect(-200, -200, W + 400, vy + 200);
-  g.moveTo(-200, vy); g.lineTo(vx - 35, vy); g.lineTo(vx - 430, H + 200); g.lineTo(-200, H + 200); g.closePath();
-  g.moveTo(vx + 35, vy); g.lineTo(W + 200, vy); g.lineTo(W + 200, H + 200); g.lineTo(vx + 430, H + 200); g.closePath(); g.clip();
-}
 let themeShader = null, themeShaderRequested = false;
 const shaderCaptures = new Float32Array(4);
 function prepareThemeShader() {
@@ -899,7 +893,7 @@ function drawMaterial(vx, vy, t = 0, playing = false) {
   }
   const shaded = !!surface;
   surface ||= materialTexture(); if (!surface) return;
-  g.save(); clipScenery(vx, vy); g.globalCompositeOperation = 'source-over'; g.globalAlpha = isPaper() ? .75 : .65;
+  g.save(); g.globalCompositeOperation = 'source-over'; g.globalAlpha = isPaper() ? .75 : .65;
   const drift = !shaded && isLiquid() && !reducedMotion?.matches ? Math.sin(barF(t) * .3) * 18 : 0;
   g.drawImage(surface, -100 + drift, -100 + drift * .4, W + 200, H + 200); g.restore();
 }
@@ -907,7 +901,7 @@ function drawMaterial(vx, vy, t = 0, playing = false) {
 // Capture timestamps already reset with the song: effects need no particle queues or timers.
 function drawCaptureMaterial(t, playing, vx, vy) {
   if (!playing || reducedMotion?.matches) return;
-  g.save(); clipScenery(vx, vy);
+  g.save();
   g.globalCompositeOperation = isPaper() ? 'source-over' : 'lighter';
   tracks.forEach((tr, i) => {
     const age = rt - tr.capAt;
@@ -1143,7 +1137,7 @@ function draw(t, playing) {
   const u = barF(t); bendAmp += ((playing ? .45 + mult * .07 : .6) - bendAmp) * .02;
   bendX = 190 * bendAmp * Math.sin(u * Math.PI / 8) * Math.cos(u * Math.PI / 22);
   bendY = 80 * bendAmp * Math.sin(u * Math.PI / 12 + 1);
-  const vx = W / 2 + bendX * 1.15, vy = HZ - bendY; // where the road vanishes
+  const vx = W / 2 + bendX, vy = HZ - bendY; // where the road vanishes
   g.setTransform(DPR, 0, 0, DPR, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
   const sky = g.createLinearGradient(0, 0, 0, H);
   sky.addColorStop(0, `hsl(${hue},60%,4%)`); sky.addColorStop(HZ / H, `hsl(${hue},70%,${(13 + pulse * 7) * (playing ? .35 + groove / 100 * .65 : 1)}%)`); sky.addColorStop(1, '#030206');
@@ -1174,14 +1168,18 @@ function draw(t, playing) {
   g.fillStyle = ground; g.fillRect(-200, vy, W + 400, H + 200);
   g.fillStyle = `hsla(${hue},90%,72%,${.45 + pulse * .55})`; g.fillRect(-200, vy - 1, W + 400, 2);
 
-  drawWorld(t, playing, vx, vy);
   drawMaterial(vx, vy, t, playing);
+  drawWorld(t, playing, vx, vy);
   drawCaptureMaterial(t, playing, vx, vy);
 
+  const roadShade = g.createLinearGradient(0, P(0, LOOK)[1], 0, HIT_Y);
+  roadShade.addColorStop(0, 'rgba(3,7,16,0)'); roadShade.addColorStop(.25, '#030710'); roadShade.addColorStop(1, '#030710');
   const ph = Math.floor(b / 2);
   tracks.forEach((tr, i) => {
     const cx = trackX(i), x0 = cx - TW / 2, x1 = cx + TW / 2, capd = locked(tr, t), me = i === cur && playing, since = rt - tr.capAt;
-    // floor
+    // Shade the actual curved road, rather than cutting a straight wedge out of the scenery.
+    g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.fillStyle = roadShade;
+    quad(x0, x1, -.35, LOOK); g.fill();
     const fl = g.createLinearGradient(0, HZ, 0, HIT_Y); fl.addColorStop(0, 'rgba(0,0,0,0)'); fl.addColorStop(1, tr.color);
     g.globalAlpha = me ? (isPaper() ? .32 : .24) : capd ? .1 + .08 * pulse : .07; g.fillStyle = fl; quad(x0, x1, -.35, LOOK); g.fill();
     if (isPaper()) {

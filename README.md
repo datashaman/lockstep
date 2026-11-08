@@ -84,7 +84,7 @@ Links use the current game's address, so share from a publicly reachable deploym
 
 MIT, see [LICENSE](LICENSE). `vendor/demucs-web/` is MIT-licensed third-party code.
 
-Theme materials are generated once at 400×300 and cached: neon scanlines/reflections, liquid caustics, paper grain/folds, and etched circuits/glass facets. They are drawn behind gameplay and clipped away from the centre of the highway. No external texture downloads are needed.
+Theme materials are generated once at 400×300 and cached: neon scanlines/reflections, liquid caustics, paper grain/folds, and etched circuits/glass facets. They are drawn continuously behind gameplay; shading follows the curved road to keep notes readable. No external texture downloads are needed.
 
 Captures trigger brief theme-specific scenery effects: neon sweeps, water ripples, ink blooms and travelling circuit pulses. Liquid caustics drift slowly; reduced-motion mode freezes that drift and suppresses capture animations. Effects reuse capture timestamps and expire after 1.6 seconds without particle queues.
 
