@@ -54,10 +54,44 @@ let hits = 0, misses = 0, caps = 0, shown = 0, rt = 0, last = performance.now() 
 let camX = 0, camTo = 0, bendX = 0, bendY = 0, bendAmp = .6, hue = HUES[0], shake = 0, missAt = -9, flash = null;
 let dash = null, entrance = null, inSync = false, syncAt = -9;
 let pauseState = null, visualOffset = 0;
+let groove = 100, missStreak = 0, failedAt = 0;
+let tempo = [{ at: 0, pos: 0, rate: 1 }];
+const voices = new Set();
 let parts = [], pops = [], rings = [], press = [-9, -9, -9], laneHit = new Array(12).fill(-9);
 const stars = Array.from({ length: 220 }, () => ({ x: Math.random() * 2 - 1, y: Math.random() * 2 - 1, z: Math.random() }));
 const LIVE = 1, CUE = .35, GHOST = .2; // stem volume: playing well / your track before a hit / other tracks (GHOST high enough to mask separation artifacts)
-const now = () => ac.currentTime - t0 - (ac.outputLatency || ac.baseLatency || 0) - offset;
+// One piecewise-linear transport drives stems, synth scheduling and judgement.
+function songTime(elapsed) {
+  const s = tempo.findLast(s => s.at <= elapsed) || tempo[0];
+  return s.pos + (elapsed - s.at) * s.rate;
+}
+function audioTime(pos) {
+  const s = tempo.findLast(s => s.pos <= pos) || tempo[0];
+  return t0 + s.at + (pos - s.pos) / s.rate;
+}
+const now = () => mode === 'failed' ? failedAt : songTime(ac.currentTime - t0 - (ac.outputLatency || ac.baseLatency || 0) - offset);
+function setTempo(rate) {
+  if (tempo.at(-1).rate === rate) return;
+  // Stay beyond the synth lookahead so already-scheduled notes never move.
+  const at = ac.currentTime - t0 + .15, pos = songTime(at);
+  tempo.push({ at, pos, rate });
+  for (const s of srcs) s.playbackRate.setValueAtTime(rate, t0 + at);
+}
+function changeGroove(amount) {
+  groove = Math.max(0, Math.min(100, groove + amount));
+  if (!groove) {
+    failedAt = now(); mode = 'failed'; inSync = false; entrance = null;
+    stopStems(); stopVoices();
+    out?.gain.setTargetAtTime(0, ac.currentTime, .02);
+    return;
+  }
+  setTempo(groove >= 40 ? 1 : .55 + .45 * groove / 40);
+}
+function voice(node) { voices.add(node); node.onended = () => voices.delete(node); return node; }
+function stopVoices() { for (const node of voices) node.stop(); voices.clear(); }
+function restoreVolume() {
+  if (out) { out.gain.cancelScheduledValues(ac.currentTime); out.gain.setValueAtTime(.8, ac.currentTime); }
+}
 const auto = (tr, n) => n.bar >= tr.capFrom && n.bar < tr.capTo;
 const locked = (tr, t) => bar(t) < tr.capTo;
 const captureRemaining = (tr, t) => Math.max(0, Math.min(1, (tr.capTo - barF(t)) / CAPTURE_BARS));
@@ -101,6 +135,8 @@ function reset(menuImage = null) {
   parts = []; pops = []; rings = []; flash = null; dash = null; laneHit.fill(-9); inSync = false; syncAt = -9;
   entrance = menuImage ? { image: menuImage, at: rt } : null;
   if (menuImage && reducedMotion?.matches) camX = camTo = trackX(cur);
+  groove = 100; missStreak = 0; tempo = [{ at: 0, pos: 0, rate: 1 }];
+  stopVoices(); restoreVolume();
   t0 = ac.currentTime + LEAD_IN; sched = -LEAD_IN;
   stopStems();
   if (song.buffers) tracks.forEach((tr, i) => { const s = ac.createBufferSource(), v = ac.createGain();
@@ -172,7 +208,7 @@ async function start() {
   try { song = await loadSong(e); reset(menuImage); }
   catch (err) { loadErr = `could not load: ${err.message || err}`; say(loadErr, 'err'); mode = 'title'; showSelected(); }
 }
-function toTitle() { inSync = false; entrance = null; stopStems(); mode = 'title'; showSelected(); }
+function toTitle() { inSync = false; entrance = null; stopStems(); stopVoices(); restoreVolume(); mode = 'title'; showSelected(); }
 
 // The title screen's backdrop is the selected song: its chart scrolls behind the menu and its stems play quietly, looping from ~30 s in.
 let pv = [], pvT0 = 0, pvFrom = 0, pvFor = null, pvTimer, pvN = 0;
@@ -287,21 +323,21 @@ function initAudio() {
   send.connect(lp).connect(fb).connect(send); lp.connect(wet).connect(out);
 }
 function tone(type, midi, when, dur, vol, cutoff = 8000, echo = 0) {
-  const o = ac.createOscillator(), v = ac.createGain(), f = ac.createBiquadFilter();
+  const o = voice(ac.createOscillator()), v = ac.createGain(), f = ac.createBiquadFilter();
   o.type = type; o.frequency.value = hz(midi); f.frequency.value = cutoff;
   v.gain.setValueAtTime(vol, when); v.gain.exponentialRampToValueAtTime(1e-4, when + dur);
   o.connect(f).connect(v).connect(out); o.start(when); o.stop(when + dur);
   if (echo) { const s = ac.createGain(); s.gain.value = echo; v.connect(s).connect(send); }
 }
 function hiss(when, dur, vol, hp) {
-  const s = ac.createBufferSource(), v = ac.createGain(), f = ac.createBiquadFilter();
+  const s = voice(ac.createBufferSource()), v = ac.createGain(), f = ac.createBiquadFilter();
   s.buffer = noise; f.type = 'highpass'; f.frequency.value = hp;
   v.gain.setValueAtTime(vol, when); v.gain.exponentialRampToValueAtTime(1e-4, when + dur);
   s.connect(f).connect(v).connect(out); s.start(when); s.stop(when + dur);
 }
 function pad(b, when) { // soft detuned chord bed so the song is never silent
   for (const m of CHORDS[b % 4]) for (const det of [-8, 8]) {
-    const o = ac.createOscillator(), v = ac.createGain(), f = ac.createBiquadFilter();
+    const o = voice(ac.createOscillator()), v = ac.createGain(), f = ac.createBiquadFilter();
     o.type = 'sawtooth'; o.frequency.value = hz(m); o.detune.value = det; f.frequency.value = 900;
     v.gain.setValueAtTime(1e-4, when); v.gain.exponentialRampToValueAtTime(.02, when + .4);
     v.gain.setValueAtTime(.02, when + BARLEN - .3); v.gain.exponentialRampToValueAtTime(1e-4, when + BARLEN + .2);
@@ -311,7 +347,7 @@ function pad(b, when) { // soft detuned chord bed so the song is never silent
 function play(kind, lane, b, when) {
   const ch = CHORDS[b % 4];
   if (kind === 'drums') {
-    if (lane === 0) { const o = ac.createOscillator(), v = ac.createGain();
+    if (lane === 0) { const o = voice(ac.createOscillator()), v = ac.createGain();
       o.frequency.setValueAtTime(150, when); o.frequency.exponentialRampToValueAtTime(40, when + .15);
       v.gain.setValueAtTime(.9, when); v.gain.exponentialRampToValueAtTime(1e-4, when + .2);
       o.connect(v).connect(out); o.start(when); o.stop(when + .2); }
@@ -324,7 +360,7 @@ function play(kind, lane, b, when) {
 function captureSfx(b) {
   const at = ac.currentTime;
   CHORDS[b % 4].forEach((m, k) => tone('triangle', m + 24, at + k * .06, .5, .12, 8000, .6));
-  const s = ac.createBufferSource(), f = ac.createBiquadFilter(), v = ac.createGain();
+  const s = voice(ac.createBufferSource()), f = ac.createBiquadFilter(), v = ac.createGain();
   s.buffer = noise; f.type = 'bandpass'; f.Q.value = 4;
   f.frequency.setValueAtTime(300, at); f.frequency.exponentialRampToValueAtTime(8000, at + .6);
   v.gain.setValueAtTime(.25, at); v.gain.exponentialRampToValueAtTime(1e-4, at + .7);
@@ -354,17 +390,18 @@ const timingLabel = delta => Math.abs(delta) < .0005 ? 'ON TIME' : `${Math.round
 function tryHit(lane) {
   press[lane] = rt;
   const tr = tracks[cur], t = now();
-  const n = tr.notes.find(n => n.lane === lane && !n.hit && !auto(tr, n) && Math.abs(n.t - t) < LEVELS[level].win);
+  const n = tr.notes.find(n => n.lane === lane && !n.hit && !auto(tr, n) && Math.abs(audioTime(t) - audioTime(n.t)) < LEVELS[level].win);
   if (!n) return; // shortcut: no penalty for stray presses
-  const delta = t - n.t, perfect = Math.abs(delta) < PERFECT, x = trackX(cur) + (lane - 1) * LW;
+  const delta = audioTime(t) - audioTime(n.t), perfect = Math.abs(delta) < PERFECT, x = trackX(cur) + (lane - 1) * LW;
   n.hit = true; hits++; tr.hits++; tr.timing += delta; score += (perfect ? 15 : 10) * mult; tr.live = true;
+  missStreak = 0; changeGroove(perfect ? 3 : 2);
   if (song.synth) play(tr.kind, lane, n.bar, ac.currentTime);
   burst(x, HIT_Y, tr.color, perfect ? 18 : 9, 1); laneHit[cur * 3 + lane] = rt;
   popup(perfect ? 'PERFECT' : timingLabel(delta), x, HIT_Y - 46, perfect ? '#fff' : tr.color, perfect ? 17 : 14, .45);
   const p = Math.floor(n.bar / 2);
   if (tr.notes.every(m => Math.floor(m.bar / 2) !== p || m.hit)) {
     const cx = trackX(cur);
-    tr.capFrom = (p + 1) * 2; tr.capTo = tr.capFrom + CAPTURE_BARS; tr.capAt = rt; caps++; tr.caps++;
+    tr.capFrom = (p + 1) * 2; tr.capTo = tr.capFrom + CAPTURE_BARS; tr.capAt = rt; caps++; tr.caps++; changeGroove(15);
     popup('CAPTURED', cx, HIT_Y - 130, tr.color, 38, 1.1); popup(`+${100 * mult}`, cx, HIT_Y - 90, '#fff', 20, 1.1);
     score += 100 * mult; mult = Math.min(8, mult + 1);
     burst(cx, HIT_Y, tr.color, 70, 1.8, TW); rings.push({ x: cx, born: rt, color: tr.color });
@@ -401,7 +438,7 @@ addEventListener('keydown', e => {
       if (rt - delArm < 2) { delArm = -9; removeSong(catalog[sel]); } else { delArm = rt; say(`press ${k === 'x' ? 'X' : k} again to delete ${catalog[sel].title}`, 'info'); } }
     return;
   }
-  if (mode === 'over') { if (k === ' ') reset(); else if (k === 'escape') toTitle(); return; }
+  if (mode === 'over' || mode === 'failed') { if (k === ' ' || k === 'enter') reset(); else if (k === 'escape') toTitle(); return; }
   if (mode !== 'play') return;
   const lane = 'jkl'.indexOf(k);
   if (k === ' ' || k === 'escape') { e.preventDefault?.(); pauseGame(); }
@@ -466,18 +503,19 @@ function updateSync(t) {
 }
 
 function logic(t) {
-  const end = song.duration, upto = t + 0.1;
-  for (const bt of beats) { if (bt >= 0) break; if (bt >= sched && bt < upto && bt >= -LEAD_IN) tone('square', 84, t0 + bt, .06, .05); } // count-in
+  const end = song.duration, upto = songTime(ac.currentTime - t0 + .1);
+  for (const bt of beats) { if (bt >= 0) break; if (bt >= sched && bt < upto && bt >= -LEAD_IN) tone('square', 84, audioTime(bt), .06, .05); } // count-in
   if (song.synth) {
-    for (let s = Math.ceil(sched / (2 * STEP)) * 2 * STEP; s < upto && s < end; s += 2 * STEP) if (s >= 0) hiss(t0 + s, .03, .05, 9000);
-    for (let b = Math.ceil(sched / BARLEN); b * BARLEN < upto && b < BARS; b++) if (b >= 0) pad(b, t0 + b * BARLEN);
+    for (let s = Math.ceil(sched / (2 * STEP)) * 2 * STEP; s < upto && s < end; s += 2 * STEP) if (s >= 0) hiss(audioTime(s), .03, .05, 9000);
+    for (let b = Math.ceil(sched / BARLEN); b * BARLEN < upto && b < BARS; b++) if (b >= 0) pad(b, audioTime(b * BARLEN));
   }
   for (const tr of tracks) {
     for (const n of tr.notes) {
-      if (song.synth && auto(tr, n) && n.t >= sched && n.t < upto) play(tr.kind, n.lane, n.bar, t0 + n.t);
-      if (!n.hit && !n.missed && t - n.t > LEVELS[level].win) { n.missed = true;
+      if (song.synth && auto(tr, n) && n.t >= sched && n.t < upto) play(tr.kind, n.lane, n.bar, audioTime(n.t));
+      if (!n.hit && !n.missed && audioTime(t) - audioTime(n.t) > LEVELS[level].win) { n.missed = true;
         if (tr === tracks[cur] && !auto(tr, n)) { mult = 1; misses++; tr.misses++; missAt = rt; shake = Math.max(shake, 3); tr.live = false;
-          popup('MISS', trackX(cur) + (n.lane - 1) * LW, HIT_Y - 40, '#ff3355', 14, .5); } }
+          popup('MISS', trackX(cur) + (n.lane - 1) * LW, HIT_Y - 40, '#ff3355', 14, .5);
+          changeGroove(-(4 + Math.min(++missStreak, 4))); if (mode === 'failed') return; } }
     }
     if (tr.gain) { const lv = locked(tr, t) ? LIVE : tr === tracks[cur] ? (tr.live ? LIVE : CUE) : GHOST;
       if (lv !== tr.level) { tr.level = lv; tr.gain.gain.setTargetAtTime(lv, ac.currentTime, .02); } }
@@ -491,14 +529,15 @@ function frame() {
   const wall = performance.now() / 1000, fdt = Math.min(.05, wall - last); last = wall;
   if (mode === 'pause') { drawPause(); requestAnimationFrame(frame); return; }
   rt = wall - visualOffset;
-  const playing = mode === 'play' || mode === 'over', t = playing ? now() : attract(); // attract mode on title
+  const playing = mode === 'play' || mode === 'over' || mode === 'failed', t = playing ? now() : attract(); // attract mode on title
   if (mode === 'play') logic(t);
   const bi = idx(beats, t);
   phase = bi < 0 || bi >= beats.length - 1 ? 0 : (t - beats[bi]) / (beats[bi + 1] - beats[bi]); pulse = Math.exp(-phase * 5);
   camTo = playing ? trackX(cur) : Math.sin(rt * .4) * 200;
   camX += (camTo - camX) * Math.min(1, fdt * 9);
   shake = Math.max(0, shake - fdt * 40);
-  const warp = .25 + pulse * .5 + (playing ? mult * .12 : 0);
+  const energy = playing ? .3 + groove / 100 * .7 : 1;
+  const warp = (.25 + pulse * .5 + (playing ? mult * .12 : 0)) * energy;
   for (const s of stars) { s.z -= fdt * warp; if (s.z < .03) { s.x = Math.random() * 2 - 1; s.y = Math.random() * 2 - 1; s.z = 1; } }
   for (const p of parts) { p.x += p.vx * fdt; p.y += p.vy * fdt; p.vy += 700 * fdt; p.vx *= .98; }
   parts = parts.filter(p => rt - p.born < p.life); pops = pops.filter(p => rt - p.born < p.life); rings = rings.filter(r => rt - r.born < .7);
@@ -635,7 +674,7 @@ function draw(t, playing) {
   const vx = W / 2 + bendX * 1.15, vy = HZ - bendY; // where the road vanishes
   g.setTransform(DPR, 0, 0, DPR, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
   const sky = g.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0, `hsl(${hue},60%,4%)`); sky.addColorStop(HZ / H, `hsl(${hue},70%,${13 + pulse * 7}%)`); sky.addColorStop(1, '#030206');
+  sky.addColorStop(0, `hsl(${hue},60%,4%)`); sky.addColorStop(HZ / H, `hsl(${hue},70%,${(13 + pulse * 7) * (playing ? .35 + groove / 100 * .65 : 1)}%)`); sky.addColorStop(1, '#030206');
   g.fillStyle = sky; g.fillRect(0, 0, W, H);
 
   // camera: shake + roll that leans into track switches
@@ -766,6 +805,11 @@ function draw(t, playing) {
   g.fillStyle = `hsl(${hue},90%,70%)`; g.fillRect(px, 22, pw * Math.max(0, Math.min(1, t / end)), 4);
   g.fillStyle = 'rgba(0,0,0,.6)'; for (let p = 2; p < bars.length && bars[p] < end; p += 2) g.fillRect(px + pw * bars[p] / end, 22, 1, 4);
   text(`${song.title} · ${LEVELS[level].name}`, W / 2, 44, `600 11px ${SANS}`, 'rgba(255,255,255,.5)');
+  const grooveColor = groove < 40 ? '#ff4d6d' : '#3ddc97';
+  g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(px + 50, 65, 200, 5);
+  g.fillStyle = grooveColor; g.fillRect(px + 50, 65, groove * 2, 5);
+  text(`GROOVE ${Math.ceil(groove)}%${groove < 40 ? ' · KEEP THE SONG ALIVE' : ''}`, W / 2, 88, `700 10px ${MONO}`, grooveColor);
+
 
   tracks.forEach((tr, i) => {
     const x = 30 + i * 190, y = 560, capd = locked(tr, t), me = i === cur;
@@ -784,6 +828,7 @@ function draw(t, playing) {
   if (t < 0) { const f = -t % 1; text(String(Math.ceil(-t)), W / 2, 330, `italic 900 ${90 + f * 60}px ${SANS}`, `rgba(255,255,255,${f})`, 'center', 30); }
   else if (t < .6) text('GO!', W / 2, 330, `italic 900 ${110 + t * 80}px ${SANS}`, `rgba(255,255,255,${1 - t / .6})`, 'center', 30);
   if (mode === 'over') drawResults();
+  if (mode === 'failed') drawFailure();
   if (entrance) {
     // Composite the last menu frame, so its many independent alpha values fade together.
     if (arrival < .4 && t < 0) {
@@ -966,8 +1011,8 @@ function drawHelp() {
 }
 // Mouse: click a song to select it, again to play; the buttons, difficulty switch and PLAY all click too.
 const at = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height]; };
-const zoneAt = (x, y) => (mode === 'title' || mode === 'pause') ? zones.findLast(z => x >= z.x && x < z.x + z.w && y >= z.y && y < z.y + z.h) : null;
-cv.addEventListener?.('click', e => { if (mode !== 'title' && mode !== 'pause') return; if (!ac) { initAudio(); showSelected(); } zoneAt(...at(e))?.fn(); });
+const zoneAt = (x, y) => (mode === 'title' || mode === 'pause' || mode === 'failed') ? zones.findLast(z => x >= z.x && x < z.x + z.w && y >= z.y && y < z.y + z.h) : null;
+cv.addEventListener?.('click', e => { if (mode !== 'title' && mode !== 'pause' && mode !== 'failed') return; if (!ac) { initAudio(); showSelected(); } zoneAt(...at(e))?.fn(); });
 cv.addEventListener?.('mousemove', e => cv.style.cursor = zoneAt(...at(e)) ? 'pointer' : 'default');
 
 function drawFind() {
@@ -982,6 +1027,19 @@ function drawFind() {
     text(`${clip(t.user.name, 22)}  ${Math.floor(t.duration / 60)}:${String(t.duration % 60).padStart(2, '0')}`, 690, y, `500 13px ${MONO}`, on ? `hsl(${hue},90%,80%)` : 'rgba(255,255,255,.4)', 'right'); });
   text('↑ ↓ choose (plays a preview)    ENTER add to your library    ESC back', W / 2, 520, `800 14px ${SANS}`, '#fff');
   text('Music streamed from audius.co by its artists, under the Audius Open Music License', W / 2, 560, `500 11px ${MONO}`, 'rgba(255,255,255,.45)');
+}
+
+function drawFailure() {
+  g.globalAlpha = 1; g.fillStyle = 'rgba(3,2,6,.9)'; g.fillRect(0, 0, W, H);
+  text('GROOVE LOST', W / 2, 215, `italic 900 54px ${SANS}`, '#ff4d6d');
+  text(fit(song.title, 660, `700 22px ${SANS}`), W / 2, 265, `700 22px ${SANS}`, '#fff');
+  text(`${Math.min(100, Math.floor(failedAt / song.duration * 100))}% COMPLETE · ${score.toLocaleString()} POINTS`, W / 2, 310, `600 15px ${MONO}`, '#a6b6c8');
+  text('Hits restore groove. Captures give you a bigger recovery.', W / 2, 355, `500 15px ${SANS}`, '#a6b6c8');
+  zones = [];
+  [['SPACE / ENTER   Retry', reset], ['ESC   Song selection', toTitle]].forEach(([label, action], i) => {
+    const y = 395 + i * 54; box(220, y, 360, 44, 8, 'rgba(255,255,255,.08)', 'rgba(255,255,255,.2)');
+    text(label, W / 2, y + 28, `700 15px ${MONO}`, '#fff'); zone(220, y, 360, 44, () => action());
+  });
 }
 
 function drawResults() {

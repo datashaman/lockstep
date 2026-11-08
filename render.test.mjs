@@ -286,3 +286,92 @@ vm.runInContext(`
   drawResults(); reset(); assert.ok(tracks.every(tr => tr.timing === 0));
 `, context);
 console.log('ok: signed timing, perfect/early/late feedback, calibration, unchanged scoring, stray exclusion and reset');
+
+vm.runInContext(`
+  pauseState = null; song = demoSong(); song.synth = false;
+  ac = { currentTime: 0 }; offset = 0; reset(); t0 = 0;
+  const rateEvents = [], stopped = [];
+  srcs = [0, 1, 2, 3].map(i => ({ playbackRate: { setValueAtTime: (rate, at) => rateEvents.push([i, rate, at]) }, stop: () => stopped.push(i) }));
+  ac.currentTime = 10;
+  changeGroove(-80);
+  assert.equal(groove, 20); assert.equal(tempo.at(-1).rate, .775);
+  assert.equal(rateEvents.length, 4); assert.ok(rateEvents.every(e => e[1] === .775 && e[2] === 10.15));
+  assert.equal(songTime(10.1), 10.1, 'committed synth lookahead is unchanged');
+  assert.ok(Math.abs(songTime(11.15) - 10.925) < 1e-9);
+  for (const elapsed of [-3, 0, 10, 10.15, 11.15, 20]) assert.ok(Math.abs(audioTime(songTime(elapsed)) - elapsed) < 1e-9);
+  ac.currentTime = 12; const beforeRecovery = now(); changeGroove(25);
+  assert.equal(groove, 45); assert.equal(tempo.at(-1).rate, 1); assert.equal(now(), beforeRecovery, 'recovery does not jump chart time');
+  for (let i = 0; i < 100; i++) {
+    ac.currentTime += .2; setTempo(i % 2 ? .65 : 1);
+    const elapsed = ac.currentTime + .3;
+    assert.ok(Math.abs(audioTime(songTime(elapsed)) - elapsed) < 1e-8, 'transport remains invertible through repeated changes');
+  }
+  const priorBest = JSON.stringify(best);
+  voice({ stop: () => stopped.push('synth') }); changeGroove(-100);
+  assert.equal(mode, 'failed'); assert.equal(srcs.length, 0); assert.equal(voices.size, 0);
+  assert.equal(stopped.length, 5); assert.equal(JSON.stringify(best), priorBest, 'failed run does not save a best');
+  const frozen = now(); ac.currentTime += 20; assert.equal(now(), frozen); drawFailure();
+  reset(); assert.equal(groove, 100); assert.equal(missStreak, 0); assert.equal(tempo.length, 1); assert.equal(mode, 'play');
+`, context);
+vm.runInContext(`
+  t0 = 0; ac.currentTime = 0; sched = 0; song.synth = false;
+  const grooveNote = t => ({ t, lane: 0, bar: Math.floor(t / BARLEN), hit: false, missed: false });
+  tracks.forEach(tr => tr.notes = []); tracks[0].notes = [grooveNote(0), grooveNote(1), grooveNote(2), grooveNote(3)];
+  tracks[1].notes = [grooveNote(0), grooveNote(1), grooveNote(2), grooveNote(3)];
+  tracks[2].notes = [grooveNote(0)]; tracks[2].capFrom = 0; tracks[2].capTo = 8;
+  cur = 0;
+  ac.currentTime = .2; logic(now()); assert.equal(groove, 95); assert.equal(missStreak, 1);
+  ac.currentTime = 1.2; logic(now()); assert.equal(groove, 89); assert.equal(missStreak, 2);
+  assert.equal(tracks[1].misses, 0, 'unselected track has no penalty');
+  cur = 2; ac.currentTime = 2.2; logic(now()); assert.equal(groove, 89, 'AUTO has no penalty or passive recovery');
+  cur = 0; ac.currentTime = 3; tryHit(0); assert.equal(groove, 92); assert.equal(missStreak, 0);
+  tracks[0].notes = [grooveNote(4)]; ac.currentTime = 4; tryHit(0); assert.equal(groove, 100, 'capture restores extra groove, capped at 100');
+  reset(); t0 = 0; ac.currentTime = 0; groove = 20; setTempo(.5);
+  tracks.forEach(tr => tr.notes = []); tracks[0].notes = [grooveNote(1), grooveNote(2)]; cur = 0;
+  ac.currentTime = audioTime(1) + .08; tryHit(0);
+  assert.equal(tracks[0].hits, 1); assert.ok(Math.abs(tracks[0].timing - .08) < 1e-9, 'judgement remains in real milliseconds');
+  ac.currentTime = audioTime(2) + .11; tryHit(0); assert.equal(tracks[0].hits, 1, 'slowdown does not widen the hit window');
+`, context);
+vm.runInContext(`
+  reset(); t0 = 0; ac.currentTime = 0; song.synth = true; groove = 20; setTempo(.5);
+  const scheduled = []; play = (kind, lane, b, when) => scheduled.push(when); hiss = () => {}; pad = () => {}; tone = () => {};
+  tracks.forEach(tr => { tr.notes = []; tr.capFrom = 0; tr.capTo = 8; });
+  tracks[0].notes = [{ t: 1, lane: 0, bar: 0, hit: false, missed: false }];
+  sched = .9; ac.currentTime = audioTime(1) - .05;
+  logic(now()); assert.equal(scheduled.length, 1); assert.equal(scheduled[0], audioTime(1), 'synth onset follows the same transport as stems');
+  assert.equal(groove, 20);
+`, context);
+console.log('ok: groove loss/recovery, shared stem/synth clock, repeated tempo changes, fixed judgement windows, failure silence, no failed best and retry');
+
+vm.runInContext(`
+  song.synth = false; reset(); t0 = 0; ac.currentTime = 0; offset = 0;
+  tracks.forEach(tr => tr.notes = []);
+  tracks[0].notes = Array.from({ length: 20 }, (_, i) => ({ t: i * .5, lane: 0, bar: Math.floor(i * .5 / BARLEN), hit: false, missed: false }));
+  cur = 0;
+  for (let i = 0; i < 20 && mode === 'play'; i++) { ac.currentTime = audioTime(i * .5) + .2; logic(now()); }
+  assert.equal(mode, 'failed'); assert.equal(groove, 0); assert.equal(misses, 14, 'consecutive misses exhaust the initial groove');
+  drawFailure(); assert.equal(zones.length, 2); zones[0].fn(); assert.equal(mode, 'play'); assert.equal(groove, 100);
+`, context);
+vm.runInContext(`
+  const sourceStarts = [], volumeEvents = [];
+  const gainParam = { value: 0, cancelScheduledValues() {}, setValueAtTime: v => volumeEvents.push(v), setTargetAtTime: v => volumeEvents.push(v) };
+  out = { gain: gainParam };
+  ac = { currentTime: 10, state: 'running',
+    createBufferSource: () => ({ playbackRate: { setValueAtTime() {} }, connect: target => target, start: at => sourceStarts.push(at), stop() {} }),
+    createGain: () => ({ gain: gainParam, connect() {} }),
+    suspend: async () => { ac.state = 'suspended'; }, resume: async () => { ac.state = 'running'; }
+  };
+  song.buffers = [{}, {}, {}, {}]; reset(); assert.deepEqual(sourceStarts, [13, 13, 13, 13]);
+  ac.currentTime = 20; changeGroove(-80); ac.currentTime = 21;
+  const lowTempoPosition = now(), lowTempoSchedule = JSON.stringify(tempo);
+  pauseGame();
+`, context);
+wallTime += 15;
+await vm.runInContext('resumeGame()', context);
+vm.runInContext(`
+  assert.equal(now(), lowTempoPosition); assert.equal(JSON.stringify(tempo), lowTempoSchedule);
+  assert.equal(groove, 20); assert.equal(srcs.length, 4, 'pause does not restart stems');
+  changeGroove(-100); assert.equal(volumeEvents.at(-1), 0);
+  reset(); assert.equal(volumeEvents.at(-1), .8); assert.equal(srcs.length, 4); assert.equal(tempo.length, 1);
+`, context);
+console.log('ok: consecutive-miss failure, clickable retry, stem start alignment, low-tempo pause/resume and volume restoration');
