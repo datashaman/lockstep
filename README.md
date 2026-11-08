@@ -33,7 +33,7 @@ The first song you add downloads the ~180 MB separation model once.
 | ← → | difficulty | switch track (also A / D) |
 | Enter / Space | play | |
 | O | add a song | |
-| Enter on *Find a song on Audius* | search Audius: type, ↑ ↓, Enter to add, Esc back | |
+| Enter on *Find a song on Audius* | search Audius: type, ↑ ↓ (plays a preview), Enter to add, Esc back | |
 | X twice | delete a song | |
 | `[` `]` | audio offset | |
 | J K L | | hit lanes |

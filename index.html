@@ -146,7 +146,7 @@ async function loadSong(e) {
 }
 async function start() {
   if (catalog[sel].add) return picker.click();
-  if (catalog[sel].find) { mode = 'find'; if (!au.list.length) auSearch(); return; }
+  if (catalog[sel].find) { mode = 'find'; au.list.length ? preview() : auSearch(); return; }
   if (!ac) initAudio();
   mode = 'loading'; loadErr = '';
   try { song = await loadSong(catalog[sel]); reset(); }
@@ -195,12 +195,19 @@ fetch('songs/index.json').then(r => r.json()).then(list => { server = list; rebu
 // Open Music License (OML), which licenses apps that play Audius audio; we credit the artist and link the track anyway.
 const AUDIUS = 'https://api.audius.co/v1/tracks', APP = 'app_name=lockstep';
 const au = { q: '', list: [], sel: 0, busy: false, err: '' }; let auN = 0, auTimer;
+const peek = globalThis.Audio ? new Audio() : null; let peekTimer;
+function preview() { // stream the highlighted track from a little way in, once the selection settles; stops outside the finder
+  clearTimeout(peekTimer); peek?.pause();
+  const t = mode === 'find' && au.list[au.sel]; if (!t || !peek) return;
+  peekTimer = setTimeout(() => { peek.src = `${AUDIUS}/${t.id}/stream?${APP}#t=${t.preview_start_seconds ?? Math.round(Math.min(30, t.duration * .3))}`;
+    peek.volume = .7; peek.play().catch(() => {}); }, 400);
+}
 function auSearch() {
   const n = ++auN, q = au.q.trim(); au.busy = true; au.err = '';
   fetch(q ? `${AUDIUS}/search?query=${encodeURIComponent(q)}&limit=50&${APP}` : `${AUDIUS}/trending?limit=50&${APP}`)
     .then(r => r.ok ? r.json() : Promise.reject(new Error(`Audius said ${r.status}`)))
     .then(({ data }) => { if (n !== auN) return; au.busy = false; au.sel = 0; // ≤10 min: separation takes ~20 s and ~40 MB per minute
-      au.list = data.filter(t => t.is_streamable && t.access?.stream && t.duration >= 30 && t.duration <= 600); })
+      au.list = data.filter(t => t.is_streamable && t.access?.stream && t.duration >= 30 && t.duration <= 600); preview(); })
     .catch(err => { if (n === auN) { au.busy = false; au.err = err.message || String(err); } });
 }
 function findKey(e) {
@@ -215,8 +222,9 @@ function findKey(e) {
   } else if (e.key === 'Backspace' || e.key.length === 1) { // typing: search after a short pause
     au.q = e.key === 'Backspace' ? au.q.slice(0, -1) : (au.q + e.key).slice(0, 40);
     clearTimeout(auTimer); auTimer = setTimeout(auSearch, 300);
+    clearTimeout(peekTimer); return peek?.pause(); // quiet while typing; the new results start their own preview
   } else return;
-  e.preventDefault?.();
+  e.preventDefault?.(); preview();
 }
 
 // ---------- audio ----------
@@ -546,9 +554,9 @@ function drawFind() {
     W / 2, 178, `600 12px ${MONO}`, au.err ? '#ff4466' : 'rgba(255,255,255,.5)');
   const top = Math.max(0, Math.min(au.sel - 4, au.list.length - 9)), clip = (t, n) => t.length > n ? t.slice(0, n - 1) + '…' : t;
   au.list.slice(top, top + 9).forEach((t, k) => { const on = top + k === au.sel, y = 220 + k * 30;
-    text(`${on ? '▶  ' : ''}${clip(t.title, 38)}`, 110, y, `${on ? 800 : 500} ${on ? 18 : 15}px ${SANS}`, on ? '#fff' : 'rgba(255,255,255,.55)', 'left', on ? 12 : 0);
+    text(`${on ? (peek && !peek.paused ? '♪  ' : '▶  ') : ''}${clip(t.title, 38)}`, 110, y, `${on ? 800 : 500} ${on ? 18 : 15}px ${SANS}`, on ? '#fff' : 'rgba(255,255,255,.55)', 'left', on ? 12 : 0);
     text(`${clip(t.user.name, 22)}  ${Math.floor(t.duration / 60)}:${String(t.duration % 60).padStart(2, '0')}`, 690, y, `500 13px ${MONO}`, on ? `hsl(${hue},90%,80%)` : 'rgba(255,255,255,.4)', 'right'); });
-  text('↑ ↓ choose    ENTER add to your library    ESC back', W / 2, 520, `800 14px ${SANS}`, '#fff');
+  text('↑ ↓ choose (plays a preview)    ENTER add to your library    ESC back', W / 2, 520, `800 14px ${SANS}`, '#fff');
   text('Music streamed from audius.co by its artists, under the Audius Open Music License', W / 2, 560, `500 11px ${MONO}`, 'rgba(255,255,255,.45)');
 }
 
