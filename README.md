@@ -69,6 +69,14 @@ node render.test.mjs    # gameplay and renderer checks
 node performance.test.mjs # repeated-play resource checks and chart-work measurements
 ```
 
+## Sharing Audius tracks
+
+Select an imported Audius track and click **C · SHARE** (or press **C**) to copy a link to this game with that track selected. Existing Audius imports work too; local files cannot be shared.
+
+The recipient opens the link and clicks **Download & play**. Lockstep resolves the track through Audius, downloads and separates it on their device, then starts playing. Already imported tracks play from their library. Closing the prompt during processing leaves the import running but cancels automatic playback. Unavailable tracks and tracks outside the 30-second–10-minute limit show an error.
+
+Links use the current game's address, so share from a publicly reachable deployment, not localhost. No audio, stems or local filenames are uploaded. The recipient needs a browser capable of running separation; first use downloads the model.
+
 ## License
 
 MIT, see [LICENSE](LICENSE). `vendor/demucs-web/` is MIT-licensed third-party code.
