@@ -15,23 +15,28 @@ const COLORS = ['#ff4d6d', '#ffb703', '#3ddc97', '#4cc9f0'];
 const THEMES = {
   neon: { name: 'Neon', colors: COLORS, hues: HUES },
   liquid: { name: 'Liquid Dream', colors: ['#ffb3c6', '#f7d794', '#8ce8cf', '#a7c7ff'], hues: [195, 205, 182, 215] },
+  paper: { name: 'Paper City', colors: ['#ef957d', '#e5ca78', '#95c6af', '#aebce0'], hues: [28, 36, 18, 42] },
+  circuit: { name: 'Circuit Cathedral', colors: ['#ff819b', '#f1d276', '#76edbd', '#89bfff'], hues: [225, 245, 215, 260] },
 };
 let themeSettings = { default: 'neon', songs: {} }, theme = THEMES.neon;
 try {
   const saved = JSON.parse(globalThis.localStorage?.lockstepThemes || '{}');
-  if (saved?.default === 'liquid') themeSettings.default = 'liquid';
-  if (saved?.songs && typeof saved.songs === 'object') themeSettings.songs = Object.fromEntries(Object.entries(saved.songs).filter(([, v]) => v === 'neon' || v === 'liquid'));
+  if (typeof saved?.default === 'string' && Object.hasOwn(THEMES, saved.default)) themeSettings.default = saved.default;
+  if (saved?.songs && typeof saved.songs === 'object') themeSettings.songs = Object.fromEntries(Object.entries(saved.songs).filter(([, v]) => typeof v === 'string' && Object.hasOwn(THEMES, v)));
 } catch {}
 const isLiquid = () => theme === THEMES.liquid;
+const isPaper = () => theme === THEMES.paper;
+const isCircuit = () => theme === THEMES.circuit;
 function applyTheme(e) {
   const key = themeSettings.songs[songKey(e || DEMO)] || themeSettings.default;
-  theme = key === 'liquid' ? THEMES.liquid : THEMES.neon;
+  theme = Object.hasOwn(THEMES, key) ? THEMES[key] : THEMES.neon;
   tracks?.forEach((tr, i) => tr.color = theme.colors[i]);
 }
 function chooseTheme(useAsDefault = false) {
   const e = catalog[sel]; if (!e || e.add || e.find) return;
-  if (useAsDefault) themeSettings.default = isLiquid() ? 'liquid' : 'neon';
-  else themeSettings.songs[songKey(e)] = isLiquid() ? 'neon' : 'liquid';
+  const keys = Object.keys(THEMES), current = keys.findIndex(key => THEMES[key] === theme);
+  if (useAsDefault) themeSettings.default = keys[current];
+  else themeSettings.songs[songKey(e)] = keys[(current + 1) % keys.length];
   applyTheme(e);
   try { localStorage.lockstepThemes = JSON.stringify(themeSettings); } catch {}
 }
@@ -669,7 +674,46 @@ function drawLiquidWorld(t, playing, vx, vy) {
   }
   g.restore();
 }
+function drawBuiltWorld(t, playing, vx, vy) {
+  g.save();
+  if (isPaper()) {
+    g.fillStyle = '#171b25'; g.fillRect(-200, vy, W + 400, H);
+    // Folded skyline: each captured instrument raises its own layer of buildings.
+    tracks.forEach((tr, i) => {
+      const light = playing ? captureLight(tr, t) : .2;
+      g.fillStyle = tr.color; g.strokeStyle = '#151c29'; g.lineWidth = 2;
+      for (let k = 0; k < 6; k++) {
+        const x = vx - 430 + k * 150 + i * 19, h = 18 + ((k * 17 + i * 31) % 55) * (.35 + light);
+        g.globalAlpha = .13 + light * .2;
+        g.beginPath(); g.moveTo(x, vy); g.lineTo(x, vy - h); g.lineTo(x + 22, vy - h - 12);
+        g.lineTo(x + 48, vy - h); g.lineTo(x + 48, vy); g.closePath(); g.fill(); g.stroke();
+        g.globalAlpha *= .5; g.fillStyle = '#f4e5bf'; g.beginPath(); g.moveTo(x + 22, vy - h - 12);
+        g.lineTo(x + 48, vy - h); g.lineTo(x + 48, vy); g.lineTo(x + 22, vy); g.closePath(); g.fill(); g.fillStyle = tr.color;
+      }
+    });
+  } else {
+    tracks.forEach((tr, i) => {
+      const light = playing ? captureLight(tr, t) : .15, w = 100 + i * 85, top = vy - 55 - i * 32;
+      g.strokeStyle = tr.color; g.globalAlpha = .15 + light * .5; g.lineWidth = 2 + light * 2;
+      g.beginPath(); g.moveTo(vx - w, vy + 40); g.lineTo(vx - w, top + 35);
+      g.lineTo(vx, top); g.lineTo(vx + w, top + 35); g.lineTo(vx + w, vy + 40); g.stroke();
+      for (const side of [-1, 1]) for (let k = 0; k < 4; k++) {
+        const x = vx + side * (w + k * 8), y = top + 45 + k * 15;
+        g.globalAlpha = .08 + light * .35; g.beginPath(); g.moveTo(x, vy + 40); g.lineTo(x, y);
+        g.lineTo(x + side * 14, y - 12); g.stroke(); g.fillStyle = tr.color;
+        g.fillRect(x + side * 14 - 2, y - 14, 4, 4);
+      }
+    });
+  }
+  if (playing && inSync) {
+    g.globalAlpha = .2; g.strokeStyle = '#fff3c4'; g.lineWidth = 5;
+    g.beginPath(); g.arc(vx, vy - 40, 30, 0, Math.PI * 2); g.stroke();
+  }
+  g.restore();
+}
+
 function drawWorld(t, playing, vx, vy) {
+  if (isPaper() || isCircuit()) return drawBuiltWorld(t, playing, vx, vy);
   if (isLiquid()) return drawLiquidWorld(t, playing, vx, vy);
   const energy = tracks.map(tr => playing ? captureLight(tr, t) : 0);
   const motion = reducedMotion?.matches ? 0 : barF(t), beat = reducedMotion?.matches ? .3 : pulse;
@@ -738,7 +782,14 @@ function drawCraft() {
   }
   g.globalAlpha = 1; g.fillStyle = '#243548'; g.strokeStyle = color; g.lineWidth = 1.5;
   g.beginPath();
-  if (isLiquid()) {
+  if (isPaper()) {
+    g.fillStyle = '#e7d6b4'; g.moveTo(x, y - 5); g.lineTo(x + 34, y + 12);
+    g.lineTo(x + 7, y + 9); g.lineTo(x, y + 15); g.lineTo(x - 7, y + 9); g.lineTo(x - 34, y + 12);
+  } else if (isCircuit()) {
+    g.fillStyle = '#1b2240'; g.moveTo(x, y - 5); g.lineTo(x + 8, y + 7);
+    g.lineTo(x + 24, y - 1); g.lineTo(x + 30, y + 13); g.lineTo(x + 8, y + 11);
+    g.lineTo(x, y + 15); g.lineTo(x - 8, y + 11); g.lineTo(x - 30, y + 13); g.lineTo(x - 24, y - 1); g.lineTo(x - 8, y + 7);
+  } else if (isLiquid()) {
     g.fillStyle = '#163c4b'; g.moveTo(x, y - 5);
     g.quadraticCurveTo(x + 10, y + 6, x + 35, y + 2);
     g.quadraticCurveTo(x + 28, y + 16, x + 7, y + 10);
@@ -793,7 +844,7 @@ function draw(t, playing) {
   g.rotate((camX - camTo) * .0005 - bendX * .0003); g.translate(-W / 2, -H / 2); // bank into the curve
 
   g.globalCompositeOperation = 'lighter'; g.lineWidth = 1.5;
-  for (let i = 0; i < (isLiquid() ? 45 : stars.length); i++) {
+  for (let i = 0; i < (isPaper() || isCircuit() ? 0 : isLiquid() ? 45 : stars.length); i++) {
     const s = stars[i], k = 260, z1 = s.z, z0 = s.z + .03 + pulse * .06;
     g.strokeStyle = `hsla(${hue + 60},80%,80%,${Math.min(1, (1 - z1) * 1.4)})`;
     g.beginPath();
@@ -820,7 +871,11 @@ function draw(t, playing) {
     const cx = trackX(i), x0 = cx - TW / 2, x1 = cx + TW / 2, capd = locked(tr, t), me = i === cur && playing, since = rt - tr.capAt;
     // floor
     const fl = g.createLinearGradient(0, HZ, 0, HIT_Y); fl.addColorStop(0, 'rgba(0,0,0,0)'); fl.addColorStop(1, tr.color);
-    g.globalAlpha = me ? .24 : capd ? .1 + .08 * pulse : .07; g.fillStyle = fl; quad(x0, x1, -.35, LOOK); g.fill();
+    g.globalAlpha = me ? (isPaper() ? .32 : .24) : capd ? .1 + .08 * pulse : .07; g.fillStyle = fl; quad(x0, x1, -.35, LOOK); g.fill();
+    if (isPaper()) {
+      g.globalAlpha = me ? .12 : .04; g.fillStyle = '#f1dfb7'; quad(x0, cx, -.35, LOOK); g.fill();
+      g.globalAlpha = .3; g.strokeStyle = '#141c29'; g.lineWidth = 2; seg(cx, -.35, cx, LOOK);
+    }
     g.globalCompositeOperation = 'lighter';
     if (playing && capd) {
       const light = captureLight(tr, t);
@@ -852,6 +907,20 @@ function draw(t, playing) {
       g.fillStyle = tr.color;
       if (au && d < 0) { if (d > -.15) { g.globalAlpha = (1 + d / .15) * .7; quad(lx + 3, lx + LW - 3, -.05, .6); g.fill(); } continue; }
       const a = (au ? .22 : n.missed ? .15 : me ? 1 : .45) * fade(d);
+      if (isPaper() || isCircuit()) {
+        const [nx, ny] = P(lx + LW / 2, d), scale = F / (F + Math.max(d, -.35));
+        g.globalAlpha = a; g.strokeStyle = isPaper() ? '#151c29' : '#eff6ff'; g.lineWidth = Math.max(1, 2 * scale);
+        if (isPaper()) {
+          g.beginPath(); g.moveTo(nx - 17 * scale, ny - 4 * scale); g.lineTo(nx + 15 * scale, ny - 5 * scale);
+          g.lineTo(nx + 18 * scale, ny + 4 * scale); g.lineTo(nx - 15 * scale, ny + 5 * scale); g.closePath();
+        } else {
+          g.beginPath(); g.moveTo(nx, ny - 7 * scale); g.lineTo(nx + 17 * scale, ny);
+          g.lineTo(nx, ny + 7 * scale); g.lineTo(nx - 17 * scale, ny); g.closePath();
+        }
+        g.fill(); g.stroke();
+        if (!au && !n.missed) { g.fillStyle = '#fff5da'; g.fillRect(nx - 6 * scale, ny - scale, 12 * scale, 2 * scale); }
+        continue;
+      }
       if (isLiquid()) {
         const [nx, ny] = P(lx + LW / 2, d), scale = F / (F + Math.max(d, -.35));
         g.globalAlpha = a * .28; g.beginPath(); g.ellipse(nx, ny, 18 * scale, 7 * scale, 0, 0, Math.PI * 2); g.fill();
@@ -1074,15 +1143,27 @@ function sleeveBands(source) {
 function drawSleeve(source, x, y, w, h, active) {
   const bands = sleeveBands(source), beat = active && !reducedMotion?.matches ? pulse : 0;
   g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip();
-  g.fillStyle = isLiquid() ? '#05232d' : '#090f19'; g.fillRect(x, y, w, h);
+  g.fillStyle = isPaper() ? '#d9ccb0' : isCircuit() ? '#111329' : isLiquid() ? '#05232d' : '#090f19'; g.fillRect(x, y, w, h);
   const cx = x + w * .64, cy = y + h * .51;
   g.strokeStyle = '#243345'; g.lineWidth = 1;
-  for (let k = 0; k < (isLiquid() ? 0 : 7); k++) {
+  for (let k = 0; k < (isLiquid() || isPaper() || isCircuit() ? 0 : 7); k++) {
     g.beginPath(); g.moveTo(x, y + k * 26); g.lineTo(x + w, y + k * 26 - 65); g.stroke();
   }
   bands.forEach((bins, i) => {
     g.strokeStyle = theme.colors[i]; g.lineWidth = 2.5;
-    if (isLiquid()) {
+    if (isPaper() || isCircuit()) {
+      g.globalAlpha = 1;
+      bins.forEach((value, k) => {
+        const px = x + w * .39 + k / bins.length * w * .57, base = y + 32 + i * 24;
+        g.fillStyle = theme.colors[i]; g.strokeStyle = isPaper() ? '#39404a' : theme.colors[i]; g.lineWidth = 1;
+        if (isPaper()) {
+          const h = 3 + value * 20; g.beginPath(); g.moveTo(px, base); g.lineTo(px, base - h);
+          g.lineTo(px + 3, base - h - 2); g.lineTo(px + 6, base - h); g.lineTo(px + 6, base); g.closePath(); g.fill(); g.stroke();
+        } else {
+          const h = 3 + value * 16; g.beginPath(); g.moveTo(px, base); g.lineTo(px, base - h); g.lineTo(px + 3, base - h); g.stroke();
+        }
+      });
+    } else if (isLiquid()) {
       g.globalAlpha = .8; g.beginPath();
       bins.forEach((value, k) => {
         const px = x + w * .38 + k / (bins.length - 1) * w * .58;
@@ -1097,10 +1178,10 @@ function drawSleeve(source, x, y, w, h, active) {
       g.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer); g.stroke();
     });
     g.globalAlpha = 1;
-    text(source.tracks[i].name + (bins.some(n => n > 0) ? '' : ' · SILENT'), x + 12, y + 22 + i * 17, `700 9px ${MONO}`, theme.colors[i], 'left');
+    text(source.tracks[i].name + (bins.some(n => n > 0) ? '' : ' · SILENT'), x + 12, y + 22 + i * 17, `700 9px ${MONO}`, isPaper() ? '#28303a' : theme.colors[i], 'left');
   });
   g.globalAlpha = 1; g.fillStyle = '#e5faff'; g.beginPath(); g.arc(cx, cy, 3 + beat, 0, Math.PI * 2); g.fill();
-  text(source ? 'FOUR TRACKS / ONE GROOVE' : 'LOADING THE GROOVE', x + 12, y + h - 10, `600 8px ${MONO}`, '#8e9bab', 'left');
+  text(source ? 'FOUR TRACKS / ONE GROOVE' : 'LOADING THE GROOVE', x + 12, y + h - 10, `600 8px ${MONO}`, isPaper() ? '#39404a' : '#8e9bab', 'left');
   g.restore();
 }
 
@@ -1129,9 +1210,9 @@ function drawCard() {
   const bpm = source?.bpm || (e === DEMO ? BPM : null), duration = a.dur || source?.duration;
   const count = ready ? tracks.reduce((n, tr) => n + tr.notes.length, 0) : null;
   text(`${bpm ? Math.round(bpm) : '—'} BPM   /   ${duration ? mmss(duration) : '—'}   /   ${count ?? '—'} NOTES`, L, y + 236, `600 10px ${MONO}`, '#a6b6c8', 'left');
-  box(R - 136, y + 22, 128, 26, 13, 'rgba(3,12,20,.85)', '#627f8f');
-  text(`T · ${theme.name}`, R - 72, y + 40, `700 10px ${SANS}`, '#fff');
-  zone(R - 136, y + 22, 128, 26, () => chooseTheme());
+  box(R - 160, y + 22, 152, 26, 13, 'rgba(3,12,20,.85)', '#627f8f');
+  text(`T · ${theme.name}`, R - 84, y + 40, `700 10px ${SANS}`, '#fff');
+  zone(R - 160, y + 22, 152, 26, () => chooseTheme());
   const defaultY = y + h + 6;
   text(`Default: ${THEMES[themeSettings.default].name} · SHIFT T to update`, (L + R) / 2, defaultY + 14, `600 10px ${MONO}`, '#a6b6c8');
   zone(L, defaultY, R - L, 22, () => chooseTheme(true));
