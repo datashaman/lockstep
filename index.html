@@ -59,6 +59,7 @@ const LIVE = 1, CUE = .35, GHOST = .2; // stem volume: playing well / your track
 const now = () => ac.currentTime - t0 - (ac.outputLatency || ac.baseLatency || 0) - offset;
 const auto = (tr, n) => n.bar >= tr.capFrom && n.bar < tr.capTo;
 const locked = (tr, t) => bar(t) < tr.capTo;
+const captureRemaining = (tr, t) => Math.max(0, Math.min(1, (tr.capTo - barF(t)) / CAPTURE_BARS));
 const trackX = i => (i - 1.5) * (TW + GAP);
 
 // Beat grid: the song's beats, extended back through the count-in and forward past the end.
@@ -90,7 +91,7 @@ function thin(notes, lv) {
   }
   return out;
 }
-const buildTracks = () => song.tracks.map((tr, i) => ({ name: tr.name, kind: tr.kind, color: COLORS[i], capFrom: -1, capTo: -1, capAt: -9, live: false,
+const buildTracks = () => song.tracks.map((tr, i) => ({ name: tr.name, kind: tr.kind, color: COLORS[i], capFrom: -1, capTo: -1, capAt: -9, live: false, hits: 0, misses: 0, caps: 0,
   notes: thin(tr.notes, level).map(([t, lane]) => ({ t, lane, bar: bar(t), hit: false, missed: false })) }));
 
 const stopStems = () => { srcs.forEach(s => s.stop()); srcs = []; };
@@ -353,14 +354,14 @@ function tryHit(lane) {
   const n = tr.notes.find(n => n.lane === lane && !n.hit && !auto(tr, n) && Math.abs(n.t - t) < LEVELS[level].win);
   if (!n) return; // shortcut: no penalty for stray presses
   const perfect = Math.abs(n.t - t) < PERFECT, x = trackX(cur) + (lane - 1) * LW;
-  n.hit = true; hits++; score += (perfect ? 15 : 10) * mult; tr.live = true;
+  n.hit = true; hits++; tr.hits++; score += (perfect ? 15 : 10) * mult; tr.live = true;
   if (song.synth) play(tr.kind, lane, n.bar, ac.currentTime);
   burst(x, HIT_Y, tr.color, perfect ? 18 : 9, 1); laneHit[cur * 3 + lane] = rt;
   popup(perfect ? 'PERFECT' : 'GOOD', x, HIT_Y - 46, perfect ? '#fff' : tr.color, perfect ? 17 : 14, .45);
   const p = Math.floor(n.bar / 2);
   if (tr.notes.every(m => Math.floor(m.bar / 2) !== p || m.hit)) {
     const cx = trackX(cur);
-    tr.capFrom = (p + 1) * 2; tr.capTo = tr.capFrom + CAPTURE_BARS; tr.capAt = rt; caps++;
+    tr.capFrom = (p + 1) * 2; tr.capTo = tr.capFrom + CAPTURE_BARS; tr.capAt = rt; caps++; tr.caps++;
     popup('CAPTURED', cx, HIT_Y - 130, tr.color, 38, 1.1); popup(`+${100 * mult}`, cx, HIT_Y - 90, '#fff', 20, 1.1);
     score += 100 * mult; mult = Math.min(8, mult + 1);
     burst(cx, HIT_Y, tr.color, 70, 1.8, TW); rings.push({ x: cx, born: rt, color: tr.color });
@@ -411,7 +412,7 @@ function logic(t) {
     for (const n of tr.notes) {
       if (song.synth && auto(tr, n) && n.t >= sched && n.t < upto) play(tr.kind, n.lane, n.bar, t0 + n.t);
       if (!n.hit && !n.missed && t - n.t > LEVELS[level].win) { n.missed = true;
-        if (tr === tracks[cur] && !auto(tr, n)) { mult = 1; misses++; missAt = rt; shake = Math.max(shake, 3); tr.live = false;
+        if (tr === tracks[cur] && !auto(tr, n)) { mult = 1; misses++; tr.misses++; missAt = rt; shake = Math.max(shake, 3); tr.live = false;
           popup('MISS', trackX(cur) + (n.lane - 1) * LW, HIT_Y - 40, '#ff3355', 14, .5); } }
     }
     if (tr.gain) { const lv = locked(tr, t) ? LIVE : tr === tracks[cur] ? (tr.live ? LIVE : CUE) : GHOST;
@@ -599,8 +600,9 @@ function draw(t, playing) {
     g.globalCompositeOperation = 'lighter';
     if (playing && capd) {
       const light = captureLight(tr, t);
-      g.globalAlpha = light * .5; g.fillStyle = tr.color;
-      quad(x0, x0 + 5, 0, LOOK); g.fill(); quad(x1 - 5, x1, 0, LOOK); g.fill();
+      const remaining = captureRemaining(tr, t), ending = tr.capTo - barF(t) <= 1;
+      g.globalAlpha = light * (ending && !reducedMotion?.matches ? .35 + pulse * .6 : .5); g.fillStyle = tr.color;
+      quad(x0, x0 + 5, 0, LOOK * remaining); g.fill(); quad(x1 - 5, x1, 0, LOOK * remaining); g.fill();
       if (!reducedMotion?.matches && since >= 0 && since < .65) {
         const d = since / .65 * LOOK;
         g.globalAlpha = 1 - since / .65; g.fillStyle = '#fff'; quad(x0, x1, d - .045, d + .045); g.fill();
@@ -689,9 +691,9 @@ function draw(t, playing) {
   tracks.forEach((tr, i) => {
     const x = 30 + i * 190, y = 560, capd = locked(tr, t), me = i === cur;
     g.fillStyle = capd ? tr.color + '40' : 'rgba(255,255,255,.05)'; g.beginPath(); g.roundRect(x, y, 170, 26, 6); g.fill();
-    if (capd) { g.fillStyle = tr.color; g.fillRect(x + 6, y + 21, 158 * Math.max(0, (tr.capTo - barF(t)) / CAPTURE_BARS), 2); }
+    if (capd) { g.fillStyle = tr.color; g.fillRect(x + 6, y + 21, 158 * captureRemaining(tr, t), 2); }
     if (me) { g.strokeStyle = '#fff'; g.lineWidth = 2; g.stroke(); }
-    text(capd ? `${tr.name}  AUTO` : tr.notes.length ? tr.name : `${tr.name} · SILENT`, x + 85, y + 17, `800 12px ${SANS}`, me ? '#fff' : tr.notes.length ? tr.color : 'rgba(255,255,255,.3)');
+    text(capd ? `${tr.name}  ${tr.capTo - barF(t) <= 1 ? 'ENDING' : 'AUTO'}` : tr.notes.length ? tr.name : `${tr.name} · SILENT`, x + 85, y + 17, `800 12px ${SANS}`, me ? '#fff' : tr.notes.length ? tr.color : 'rgba(255,255,255,.3)');
   });
 
   g.globalAlpha = 1;
@@ -904,15 +906,33 @@ function drawFind() {
 }
 
 function drawResults() {
-  const a = Math.min(1, (rt - overAt) * 2), acc = hits / Math.max(1, hits + misses), gr = grade(acc);
-  g.globalAlpha = a; g.fillStyle = 'rgba(3,2,6,.78)'; g.fillRect(0, 0, W, H);
-  text(`SONG COMPLETE · ${LEVELS[level].name}`, W / 2, 150, `800 18px ${SANS}`, 'rgba(255,255,255,.7)');
-  text(gr, W / 2, 330, `italic 900 ${170 + (1 - a) * 120}px ${SANS}`, `hsl(${hue},95%,70%)`, 'center', 50);
-  text(String(score), W / 2, 395, `700 40px ${MONO}`, '#fff', 'center', 12);
-  text(`accuracy ${(acc * 100).toFixed(1)}%    captures ${caps}`, W / 2, 432, `600 15px ${MONO}`, 'rgba(255,255,255,.75)');
-  if (newBest) text('NEW BEST', W / 2, 462, `italic 900 18px ${SANS}`, `hsl(${hue},95%,75%)`, 'center', 14);
-  if (Math.floor(rt * 2) % 2) text('SPACE to play again   ·   ESC menu', W / 2, 500, `800 16px ${SANS}`, '#fff');
-  g.globalAlpha = 1;
+  const acc = hits / Math.max(1, hits + misses), gr = grade(acc), record = best[`${playKey}:${level}`];
+  const [title, artist = ''] = song.title.split(' — ');
+  g.globalAlpha = 1; g.fillStyle = 'rgba(3,2,6,.94)'; g.fillRect(0, 0, W, H);
+  text(`SESSION COMPLETE / ${LEVELS[level].name}`, 48, 50, `700 11px ${MONO}`, '#a6b6c8', 'left');
+  text(fit(title, 704, `900 32px ${SANS}`), 48, 91, `900 32px ${SANS}`, '#fff', 'left');
+  if (artist) text(fit(artist, 704, `600 14px ${SANS}`), 48, 115, `600 14px ${SANS}`, '#a6b6c8', 'left');
+  drawSleeve(song, 48, 136, 310, 190, false);
+  text(gr, 450, 265, `italic 900 124px ${SANS}`, `hsl(${hue},95%,75%)`, 'center', 18);
+  text('SCORE', 752, 165, `700 10px ${MONO}`, '#a6b6c8', 'right');
+  text(score.toLocaleString(), 752, 207, `700 34px ${MONO}`, '#fff', 'right');
+  text(`${(acc * 100).toFixed(1)}% ACCURACY`, 752, 241, `600 12px ${MONO}`, '#a6b6c8', 'right');
+  text(`${caps} CAPTURES`, 752, 264, `600 12px ${MONO}`, '#a6b6c8', 'right');
+  text(newBest ? 'NEW PERSONAL BEST' : `BEST  ${record ? record.score.toLocaleString() : '—'}`, 752, 308, `800 13px ${MONO}`, newBest ? '#3ddc97' : '#a6b6c8', 'right');
+  text('INSTRUMENT', 64, 365, `700 10px ${MONO}`, '#a6b6c8', 'left');
+  text('HITS / MISSES', 440, 365, `700 10px ${MONO}`, '#a6b6c8', 'right');
+  text('ACCURACY', 594, 365, `700 10px ${MONO}`, '#a6b6c8', 'right');
+  text('CAPTURES', 736, 365, `700 10px ${MONO}`, '#a6b6c8', 'right');
+  tracks.forEach((tr, i) => {
+    const y = 393 + i * 29, attempts = tr.hits + tr.misses;
+    if (i % 2 === 0) { g.fillStyle = 'rgba(255,255,255,.035)'; g.fillRect(48, y - 19, 704, 28); }
+    text(tr.name, 64, y, `800 12px ${SANS}`, tr.color, 'left');
+    text(`${tr.hits} / ${tr.misses}`, 440, y, `600 12px ${MONO}`, '#fff', 'right');
+    text(attempts ? `${(tr.hits / attempts * 100).toFixed(1)}%` : tr.notes.length ? 'UNPLAYED' : 'SILENT', 594, y, `600 11px ${MONO}`, '#a6b6c8', 'right');
+    text(String(tr.caps), 736, y, `600 12px ${MONO}`, '#fff', 'right');
+  });
+  text('Manual hits and misses only · AUTO notes excluded', 48, 512, `500 10px ${MONO}`, '#a6b6c8', 'left');
+  text('SPACE  play again       ESC  song selection', W / 2, 558, `800 14px ${MONO}`, '#fff');
 }
 
 setGrid(song); tracks = buildTracks(); rebuild();
