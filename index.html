@@ -56,7 +56,7 @@ let dash = null, entrance = null, inSync = false, syncAt = -9;
 let pauseState = null, visualOffset = 0;
 let groove = 100, missStreak = 0, failedAt = 0;
 let tempo = [{ at: 0, pos: 0, rate: 1 }];
-const voices = new Set();
+const voices = new Map();
 let parts = [], pops = [], rings = [], press = [-9, -9, -9], laneHit = new Array(12).fill(-9);
 const stars = Array.from({ length: 220 }, () => ({ x: Math.random() * 2 - 1, y: Math.random() * 2 - 1, z: Math.random() }));
 const LIVE = 1, CUE = .35, GHOST = .2; // stem volume: playing well / your track before a hit / other tracks (GHOST high enough to mask separation artifacts)
@@ -87,8 +87,11 @@ function changeGroove(amount) {
   }
   setTempo(groove >= 40 ? 1 : .55 + .45 * groove / 40);
 }
-function voice(node) { voices.add(node); node.onended = () => voices.delete(node); return node; }
-function stopVoices() { for (const node of voices) node.stop(); voices.clear(); }
+function voice(node, ...graph) {
+  const cleanup = () => { node.disconnect(); for (const part of graph) part?.disconnect(); voices.delete(node); node.onended = null; };
+  voices.set(node, cleanup); node.onended = cleanup; return node;
+}
+function stopVoices() { for (const [node, cleanup] of voices) { node.stop(); cleanup(); } }
 function restoreVolume() {
   if (out) { out.gain.cancelScheduledValues(ac.currentTime); out.gain.setValueAtTime(.8, ac.currentTime); }
 }
@@ -129,7 +132,7 @@ function thin(notes, lv) {
 const buildTracks = () => song.tracks.map((tr, i) => ({ name: tr.name, kind: tr.kind, color: COLORS[i], capFrom: -1, capTo: -1, capAt: -9, live: false, hits: 0, misses: 0, caps: 0, timing: 0,
   notes: thin(tr.notes, level).map(([t, lane]) => ({ t, lane, bar: bar(t), hit: false, missed: false })) }));
 
-const stopStems = () => { srcs.forEach(s => s.stop()); srcs = []; };
+const stopStems = () => { srcs.forEach(s => { s.stop(); s.onended?.(); }); srcs = []; };
 function reset(menuImage = null) {
   setGrid(song); tracks = buildTracks(); cur = Math.max(0, tracks.findIndex(tr => tr.notes.length)); score = 0; mult = 1; mode = 'play'; hits = misses = caps = 0; shown = 0;
   parts = []; pops = []; rings = []; flash = null; dash = null; laneHit.fill(-9); inSync = false; syncAt = -9;
@@ -140,6 +143,7 @@ function reset(menuImage = null) {
   t0 = ac.currentTime + LEAD_IN; sched = -LEAD_IN;
   stopStems();
   if (song.buffers) tracks.forEach((tr, i) => { const s = ac.createBufferSource(), v = ac.createGain();
+    s.onended = () => { s.disconnect(); v.disconnect(); s.onended = null; };
     s.buffer = song.buffers[i]; v.gain.value = 0; s.connect(v).connect(out); s.start(t0); srcs.push(s); tr.gain = v; tr.level = 0; });
 }
 // ---------- song sources: built-in demo · your library (separated in this browser, kept in IndexedDB) · songs/ (prep.py) ----------
@@ -158,13 +162,16 @@ function saveBest() {
 Promise.all(['analyze.js', 'separator.js', 'vendor/demucs-web/fft.js'].map(f => globalThis.fetch?.(f, { cache: 'no-cache' }).catch(() => {})))
   .then(() => import('./analyze.js')).then(m => CHART_V = m.CHART_V).catch(() => {});
 const pending = new Map();
+function releaseWorker() {
+  if (worker && !pending.size && !job && !jobs.length) { worker.terminate(); worker = null; }
+}
 function work(msg, transfer = [], onProgress) { // run a job on the separator worker; replies are routed by id
   if (!worker) { worker = new Worker('separator.js', { type: 'module' });
     worker.onmessage = ({ data: d }) => { const p = pending.get(d.id); if (!p) return;
       if (d.type === 'progress') return p.onProgress?.(d);
       pending.delete(d.id); d.type === 'done' ? p.ok(d) : p.no(new Error(d.message)); };
-    worker.onerror = e => { for (const p of pending.values()) p.no(new Error(e.message || 'separator failed to start')); pending.clear(); }; }
-  return new Promise((ok, no) => { pending.set(msg.id, { ok, no, onProgress }); worker.postMessage(msg, transfer); });
+    worker.onerror = e => { for (const p of pending.values()) p.no(new Error(e.message || 'separator failed to start')); pending.clear(); worker.terminate(); worker = null; }; }
+  return new Promise((ok, no) => { pending.set(msg.id, { ok, no, onProgress }); worker.postMessage(msg, transfer); }).finally(releaseWorker);
 }
 let toast = { s: '', kind: 'ok', at: -9 };
 const say = (s, kind = 'ok') => toast = { s, kind, at: rt }; // kind: ok | info | err
@@ -179,22 +186,33 @@ const f2i = a => { const o = new Int16Array(a.length); for (let i = 0; i < a.len
 const i2f = a => { const o = new Float32Array(a.length); for (let i = 0; i < a.length; i++) o[i] = a[i] / 32767; return o; };
 const hex = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
 
-async function loadSong(e) {
-  if (e.song) return e.song;
-  if (e.lib) { const pcm = (await idb('pcm', 'get', e.lib)).map(([l, r]) => [i2f(l), i2f(r)]);
+const songLoads = new WeakMap();
+function loadSong(e) {
+  if (e.song) return Promise.resolve(e.song);
+  if (!songLoads.has(e)) songLoads.set(e, decodeSong(e).then(s => {
+    if (catalog[sel] === e) {
+      for (const other of catalog) if (other !== e) delete other.song;
+      e.song = s;
+    }
+    return s;
+  }).finally(() => songLoads.delete(e)));
+  return songLoads.get(e);
+}
+async function decodeSong(e) {
+  if (e.lib) { const pcm = await idb('pcm', 'get', e.lib);
     if (CHART_V && e.meta.v !== CHART_V) { // charted by an older analyze.js: re-chart from the saved stems (seconds, no re-separation)
-      const stems = Object.fromEntries(e.meta.tracks.map((tr, i) => [tr.stem, { left: pcm[i][0].slice(), right: pcm[i][1].slice() }]));
+      const stems = Object.fromEntries(e.meta.tracks.map((tr, i) => [tr.stem, { left: i2f(pcm[i][0]), right: i2f(pcm[i][1]) }]));
       e.meta = (await work({ id: 'chart:' + e.lib, stems }, Object.values(stems).flatMap(s => [s.left.buffer, s.right.buffer]))).song;
       const row = await idb('songs', 'get', e.lib); await idb('songs', 'put', { ...row, song: e.meta });
     }
-    return e.song = { ...e.meta, title: e.title, buffers: pcm.map(([l, r]) => { const b = ac.createBuffer(2, l.length, 44100);
-      b.copyToChannel(l, 0); b.copyToChannel(r, 1); return b; }) }; }
+    return { ...e.meta, title: e.title, buffers: pcm.map(([l, r]) => { const b = ac.createBuffer(2, l.length, 44100);
+      b.copyToChannel(i2f(l), 0); b.copyToChannel(i2f(r), 1); return b; }) }; }
   if (!e.slug) return demoSong();
   const base = `songs/${e.slug}/`, res = await fetch(base + 'song.json');
   if (!res.ok) throw new Error(`${base}song.json: ${res.status}`);
   const s = await res.json();
   s.buffers = await Promise.all(s.tracks.map(async tr => ac.decodeAudioData(await (await fetch(base + tr.stem)).arrayBuffer())));
-  return e.song = s;
+  return s;
 }
 async function start() {
   const e = catalog[sel]; if (!e || mode === 'loading') return;
@@ -211,18 +229,17 @@ async function start() {
 function toTitle() { inSync = false; entrance = null; stopStems(); stopVoices(); restoreVolume(); mode = 'title'; showSelected(); }
 
 // The title screen's backdrop is the selected song: its chart scrolls behind the menu and its stems play quietly, looping from ~30 s in.
-let pv = [], pvT0 = 0, pvFrom = 0, pvFor = null, pvTimer, pvN = 0;
-const stopPreview = () => { pv.forEach(s => s.stop()); pv = []; };
+let pv = [], pvGain = null, pvT0 = 0, pvFrom = 0, pvFor = null, pvTimer, pvN = 0;
+const stopPreview = () => { pv.forEach(s => { s.stop(); s.disconnect(); }); pv = []; pvGain?.disconnect(); pvGain = null; };
 function showSelected() {
   clearTimeout(pvTimer); const e = catalog[sel], n = ++pvN;
   if (!e || e.add || e.find) return; // keep whatever is playing behind the add/find buttons
   pvTimer = setTimeout(async () => {
     try {
       const s = await loadSong(e); if (n !== pvN || mode !== 'title') return;
-      for (const x of catalog) if (x !== e && x.lib) delete x.song; // hold one decoded library song (~85 MB a minute as floats)
       song = s; setGrid(song); tracks = buildTracks(); pvFor = e; stopPreview(); pvFrom = Math.min(30, song.duration * .3);
       if (!ac || !song.buffers) return;
-      const v = ac.createGain(); v.gain.value = .35; v.connect(out); pvT0 = ac.currentTime + .05;
+      const v = pvGain = ac.createGain(); v.gain.value = .35; v.connect(out); pvT0 = ac.currentTime + .05;
       for (const b of song.buffers) { const src = ac.createBufferSource(); src.buffer = b; src.loop = true; src.loopStart = pvFrom; src.loopEnd = song.duration;
         src.connect(v); src.start(pvT0, pvFrom); pv.push(src); }
     } catch (err) { if (n === pvN) say(`could not load ${e.title}: ${err.message || err}`, 'err'); }
@@ -241,7 +258,7 @@ function addFiles(files) {
   if (!job) nextJob();
 }
 async function nextJob() {
-  const j = jobs.shift(); if (!j) return job = null; // j: { title, bytes: () => Promise<ArrayBuffer>, url? (where it came from) }
+  const j = jobs.shift(); if (!j) { job = null; releaseWorker(); return; } // j: { title, bytes: () => Promise<ArrayBuffer>, url? (where it came from) }
   job = { title: j.title, phase: j.url ? 'download' : 'decode', progress: 0 };
   try {
     const bytes = await j.bytes(); job.phase = 'decode';
@@ -323,34 +340,36 @@ function initAudio() {
   send.connect(lp).connect(fb).connect(send); lp.connect(wet).connect(out);
 }
 function tone(type, midi, when, dur, vol, cutoff = 8000, echo = 0) {
-  const o = voice(ac.createOscillator()), v = ac.createGain(), f = ac.createBiquadFilter();
+  const o = ac.createOscillator(), v = ac.createGain(), f = ac.createBiquadFilter();
   o.type = type; o.frequency.value = hz(midi); f.frequency.value = cutoff;
   v.gain.setValueAtTime(vol, when); v.gain.exponentialRampToValueAtTime(1e-4, when + dur);
   o.connect(f).connect(v).connect(out); o.start(when); o.stop(when + dur);
-  if (echo) { const s = ac.createGain(); s.gain.value = echo; v.connect(s).connect(send); }
+  let echoSend;
+  if (echo) { echoSend = ac.createGain(); echoSend.gain.value = echo; v.connect(echoSend).connect(send); }
+  voice(o, v, f, echoSend);
 }
 function hiss(when, dur, vol, hp) {
-  const s = voice(ac.createBufferSource()), v = ac.createGain(), f = ac.createBiquadFilter();
+  const s = ac.createBufferSource(), v = ac.createGain(), f = ac.createBiquadFilter();
   s.buffer = noise; f.type = 'highpass'; f.frequency.value = hp;
   v.gain.setValueAtTime(vol, when); v.gain.exponentialRampToValueAtTime(1e-4, when + dur);
-  s.connect(f).connect(v).connect(out); s.start(when); s.stop(when + dur);
+  s.connect(f).connect(v).connect(out); s.start(when); s.stop(when + dur); voice(s, v, f);
 }
 function pad(b, when) { // soft detuned chord bed so the song is never silent
   for (const m of CHORDS[b % 4]) for (const det of [-8, 8]) {
-    const o = voice(ac.createOscillator()), v = ac.createGain(), f = ac.createBiquadFilter();
+    const o = ac.createOscillator(), v = ac.createGain(), f = ac.createBiquadFilter();
     o.type = 'sawtooth'; o.frequency.value = hz(m); o.detune.value = det; f.frequency.value = 900;
     v.gain.setValueAtTime(1e-4, when); v.gain.exponentialRampToValueAtTime(.02, when + .4);
     v.gain.setValueAtTime(.02, when + BARLEN - .3); v.gain.exponentialRampToValueAtTime(1e-4, when + BARLEN + .2);
-    o.connect(f).connect(v).connect(out); o.start(when); o.stop(when + BARLEN + .25);
+    o.connect(f).connect(v).connect(out); o.start(when); o.stop(when + BARLEN + .25); voice(o, v, f);
   }
 }
 function play(kind, lane, b, when) {
   const ch = CHORDS[b % 4];
   if (kind === 'drums') {
-    if (lane === 0) { const o = voice(ac.createOscillator()), v = ac.createGain();
+    if (lane === 0) { const o = ac.createOscillator(), v = ac.createGain();
       o.frequency.setValueAtTime(150, when); o.frequency.exponentialRampToValueAtTime(40, when + .15);
       v.gain.setValueAtTime(.9, when); v.gain.exponentialRampToValueAtTime(1e-4, when + .2);
-      o.connect(v).connect(out); o.start(when); o.stop(when + .2); }
+      o.connect(v).connect(out); o.start(when); o.stop(when + .2); voice(o, v); }
     else if (lane === 1) hiss(when, .15, .5, 1200);
     else hiss(when, .05, .25, 7000);
   } else if (kind === 'bass') tone('sawtooth', ch[lane] - 24, when, .22, .35, 700);
@@ -360,11 +379,11 @@ function play(kind, lane, b, when) {
 function captureSfx(b) {
   const at = ac.currentTime;
   CHORDS[b % 4].forEach((m, k) => tone('triangle', m + 24, at + k * .06, .5, .12, 8000, .6));
-  const s = voice(ac.createBufferSource()), f = ac.createBiquadFilter(), v = ac.createGain();
+  const s = ac.createBufferSource(), f = ac.createBiquadFilter(), v = ac.createGain();
   s.buffer = noise; f.type = 'bandpass'; f.Q.value = 4;
   f.frequency.setValueAtTime(300, at); f.frequency.exponentialRampToValueAtTime(8000, at + .6);
   v.gain.setValueAtTime(.25, at); v.gain.exponentialRampToValueAtTime(1e-4, at + .7);
-  s.connect(f).connect(v).connect(out); s.start(at); s.stop(at + .7);
+  s.connect(f).connect(v).connect(out); s.start(at); s.stop(at + .7); voice(s, v, f);
 }
 
 // ---------- fx (x is in hit-plane world space: screen x = W/2 + x - camX) ----------
