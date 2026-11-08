@@ -50,7 +50,7 @@ let level = +(globalThis.localStorage?.lockstepLevel ?? 1);
 let offset = +(globalThis.localStorage?.lockstepOffset || 0), offsetAt = -9; // player's audio calibration, seconds
 let beats, bars, gridDown;
 let hits = 0, misses = 0, caps = 0, shown = 0, rt = 0, last = performance.now() / 1000, phase = 0, pulse = 0;
-let camX = 0, camTo = 0, hue = HUES[0], shake = 0, missAt = -9, flash = null;
+let camX = 0, camTo = 0, bendX = 0, bendY = 0, bendAmp = .6, hue = HUES[0], shake = 0, missAt = -9, flash = null;
 let parts = [], pops = [], rings = [], press = [-9, -9, -9], laneHit = new Array(12).fill(-9);
 const stars = Array.from({ length: 220 }, () => ({ x: Math.random() * 2 - 1, y: Math.random() * 2 - 1, z: Math.random() }));
 const LIVE = 1, CUE = .35, GHOST = .2; // stem volume: playing well / your track before a hit / other tracks (GHOST high enough to mask separation artifacts)
@@ -395,10 +395,15 @@ function frame() {
 }
 
 // ---------- rendering ----------
-function P(x, dt) { const s = F / (F + Math.max(dt, -.35)); return [W / 2 + (x - camX) * s, HZ + (HIT_Y - HZ) * s]; }
-function quad(x0, x1, d0, d1) { const a = P(x0, d0), b = P(x1, d0), c = P(x1, d1), d = P(x0, d1);
-  g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.lineTo(c[0], c[1]); g.lineTo(d[0], d[1]); g.closePath(); }
-function seg(x0, d0, x1, d1) { const a = P(x0, d0), b = P(x1, d1); g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); }
+// The highway bends: offsets grow with the square of distance ahead, so the hit line never moves and only the road ahead sways.
+function P(x, dt) { const s = F / (F + Math.max(dt, -.35)), c = (Math.max(0, dt) / LOOK) ** 2;
+  return [W / 2 + (x - camX) * s + bendX * c, HZ + (HIT_Y - HZ) * s - bendY * c]; }
+const steps = (d0, d1) => Math.max(1, Math.ceil(Math.abs(d1 - d0) / .2)); // long spans are drawn in pieces so they curve
+function quad(x0, x1, d0, d1) { const n = steps(d0, d1); g.beginPath();
+  for (let k = 0; k <= n; k++) g.lineTo(...P(x0, d0 + (d1 - d0) * k / n));
+  for (let k = n; k >= 0; k--) g.lineTo(...P(x1, d0 + (d1 - d0) * k / n)); g.closePath(); }
+function seg(x0, d0, x1, d1) { const n = steps(d0, d1); g.beginPath();
+  for (let k = 0; k <= n; k++) g.lineTo(...P(x0 + (x1 - x0) * k / n, d0 + (d1 - d0) * k / n)); g.stroke(); }
 const fade = d => Math.max(0, Math.min(1, (LOOK - d) / 1.2));
 const sx = x => W / 2 + x - camX;
 function text(s, x, y, font, color, align = 'center', glow = 0) {
@@ -409,6 +414,11 @@ function text(s, x, y, font, color, align = 'center', glow = 0) {
 function draw(t, playing) {
   const b = bar(t), dh = ((HUES[b % 4] - hue) % 360 + 540) % 360 - 180;
   hue += dh * .04;
+  // slow sways locked to the bar grid (one long left-right swing per 16 bars), swooping harder as the multiplier climbs
+  const u = barF(t); bendAmp += ((playing ? .45 + mult * .07 : .6) - bendAmp) * .02;
+  bendX = 190 * bendAmp * Math.sin(u * Math.PI / 8) * Math.cos(u * Math.PI / 22);
+  bendY = 80 * bendAmp * Math.sin(u * Math.PI / 12 + 1);
+  const vx = W / 2 + bendX * 1.15, vy = HZ - bendY; // where the road vanishes
   g.setTransform(DPR, 0, 0, DPR, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
   const sky = g.createLinearGradient(0, 0, 0, H);
   sky.addColorStop(0, `hsl(${hue},60%,4%)`); sky.addColorStop(HZ / H, `hsl(${hue},70%,${13 + pulse * 7}%)`); sky.addColorStop(1, '#030206');
@@ -416,25 +426,25 @@ function draw(t, playing) {
 
   // camera: shake + roll that leans into track switches
   g.translate(W / 2 + (Math.random() - .5) * shake, H / 2 + (Math.random() - .5) * shake);
-  g.rotate((camX - camTo) * .0005); g.translate(-W / 2, -H / 2);
+  g.rotate((camX - camTo) * .0005 - bendX * .0003); g.translate(-W / 2, -H / 2); // bank into the curve
 
   g.globalCompositeOperation = 'lighter'; g.lineWidth = 1.5;
   for (const s of stars) {
     const k = 260, z1 = s.z, z0 = s.z + .03 + pulse * .06;
     g.strokeStyle = `hsla(${hue + 60},80%,80%,${Math.min(1, (1 - z1) * 1.4)})`;
-    g.beginPath(); g.moveTo(W / 2 + s.x / z0 * k, HZ + s.y / z0 * k); g.lineTo(W / 2 + s.x / z1 * k, HZ + s.y / z1 * k); g.stroke();
+    g.beginPath(); g.moveTo(vx + s.x / z0 * k, vy + s.y / z0 * k); g.lineTo(vx + s.x / z1 * k, vy + s.y / z1 * k); g.stroke();
   }
-  const core = g.createRadialGradient(W / 2, HZ, 0, W / 2, HZ, 150 + pulse * 50);
+  const core = g.createRadialGradient(vx, vy, 0, vx, vy, 150 + pulse * 50);
   core.addColorStop(0, `hsla(${hue},90%,70%,${.4 + mult * .03})`); core.addColorStop(1, 'hsla(0,0%,0%,0)');
-  g.fillStyle = core; g.fillRect(W / 2 - 220, HZ - 220, 440, 440);
+  g.fillStyle = core; g.fillRect(vx - 220, vy - 220, 440, 440);
   g.strokeStyle = `hsla(${hue},90%,75%,${(1 - phase) * .45})`; g.lineWidth = 2;
-  g.beginPath(); g.arc(W / 2, HZ, 20 + phase * 280, 0, 7); g.stroke();
+  g.beginPath(); g.arc(vx, vy, 20 + phase * 280, 0, 7); g.stroke();
   g.globalCompositeOperation = 'source-over';
 
-  const ground = g.createLinearGradient(0, HZ, 0, H);
+  const ground = g.createLinearGradient(0, vy, 0, H);
   ground.addColorStop(0, `hsla(${hue},60%,12%,.3)`); ground.addColorStop(.12, 'rgba(4,3,10,.94)'); ground.addColorStop(1, '#020205');
-  g.fillStyle = ground; g.fillRect(-200, HZ, W + 400, H + 200);
-  g.fillStyle = `hsla(${hue},90%,72%,${.45 + pulse * .55})`; g.fillRect(-200, HZ - 1, W + 400, 2);
+  g.fillStyle = ground; g.fillRect(-200, vy, W + 400, H + 200);
+  g.fillStyle = `hsla(${hue},90%,72%,${.45 + pulse * .55})`; g.fillRect(-200, vy - 1, W + 400, 2);
 
   const ph = Math.floor(b / 2);
   tracks.forEach((tr, i) => {
