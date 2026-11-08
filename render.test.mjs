@@ -56,3 +56,35 @@ calls = [];
 vm.runInContext('drawWorld(2, false, 400, 190)', context);
 assert.ok(!calls.some(([name]) => name === 'stroke' || name === 'fillRect'), 'no captured scenery on menu');
 console.log('ok: capture fade, expiration, silent tracks, 0–4 captures, handoff, finite geometry, reduced motion');
+
+// Rapid switches start from the craft's visible position, without teleporting.
+motion.matches = false;
+vm.runInContext(`
+  ac = { currentTime: 0 }; t0 = 0; hiss = () => {};
+  tracks.forEach(tr => tr.capTo = -1); cur = 0; dash = null; rt = 20;
+  assert.equal(craftX(), trackX(0));
+  move(1); assert.equal(cur, 1); assert.equal(craftX(), trackX(0));
+  rt += .08; const midway = craftX();
+  assert.ok(midway > trackX(0) && midway < trackX(1));
+  move(-1); assert.equal(craftX(), midway);
+  rt += .2; assert.equal(craftX(), trackX(0));
+  const previous = dash; move(-1); assert.equal(dash, previous);
+  flash = { color: '#ff4d6d', born: rt }; laneHit.fill(-9);
+`, context);
+calls = [];
+vm.runInContext('drawCraft()', context);
+const idleFlames = calls.filter(([name]) => name === 'lineTo').map(call => call[2]);
+for (let lane = 0; lane < 3; lane++) {
+  calls = [];
+  vm.runInContext(`laneHit.fill(-9); laneHit[${lane}] = rt; drawCraft()`, context);
+  const flameYs = calls.filter(([name]) => name === 'lineTo').map(call => call[2]);
+  assert.equal(flameYs.filter((y, i) => y !== idleFlames[i]).length, 1, 'one hit extends only its own thruster');
+  for (const [name, , y] of calls) if (name === 'moveTo' || name === 'lineTo') assert.ok(y > 500 && y < 530, 'craft stays between hit line and key hints');
+}
+motion.matches = true;
+vm.runInContext('move(1); assert.equal(craftX(), trackX(cur))', context);
+calls = [];
+vm.runInContext('drawCraft()', context);
+assert.equal(calls.filter(([name]) => name === 'stroke').length, 1, 'reduced motion omits dash trail');
+vm.runInContext('reset(); assert.equal(dash, null); assert.ok(laneHit.every(t => t === -9))', context);
+console.log('ok: craft dash, rapid reversal, blocked switch, independent thrusters, clearance, reduced motion, restart');
