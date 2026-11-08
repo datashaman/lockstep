@@ -1,7 +1,9 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Lockstep</title>
 <style>html,body{margin:0;height:100%;background:#030206;overflow:hidden}body{display:grid;place-items:center}
-canvas{width:min(100vw,133.33vh);height:min(75vw,100vh)}</style></head>
+canvas{width:min(100vw,133.33vh);height:min(75vw,100vh)}
+dialog{color:#fff;background:#140c22;border:1px solid #627f8f;border-radius:18px;padding:28px;width:min(420px,80vw);font:16px system-ui}dialog::backdrop{background:#030206dd}dialog h2{margin-top:0}dialog p{line-height:1.5}dialog button{font:700 14px system-ui;padding:12px 18px;border-radius:8px;border:0;margin:8px 8px 0 0;cursor:pointer}dialog button:focus-visible{outline:3px solid #4cc9f0}dialog input{box-sizing:border-box;width:100%;padding:10px}
+</style></head>
 <body><canvas id="c"></canvas>
 <script>
 // Lockstep: original phrase-capture rhythm game. J K L = lanes, A / D = switch track.
@@ -309,7 +311,8 @@ async function nextJob() {
   try {
     const bytes = await j.bytes(); job.phase = 'decode';
     const id = hex(await crypto.subtle.digest('SHA-256', bytes)).slice(0, 16);
-    if (library.some(e => e.lib === id)) { say(`${job.title} is already in your library`, 'info'); return nextJob(); }
+    const existing = library.find(e => e.lib === id);
+    if (existing) { say(`${job.title} is already in your library`, 'info'); j.done?.(existing); return nextJob(); }
     const ab = await new OfflineAudioContext(2, 1, 44100).decodeAudioData(bytes); // resamples to the model's 44.1 kHz
     const left = ab.getChannelData(0).slice(), right = ab.getChannelData(ab.numberOfChannels > 1 ? 1 : 0).slice();
     const { song: meta, stems } = await work({ id, left, right }, [left.buffer, right.buffer], d => Object.assign(job, d));
@@ -317,8 +320,9 @@ async function nextJob() {
     await idb('pcm', 'put', meta.tracks.map(tr => [f2i(stems[tr.stem].left), f2i(stems[tr.stem].right)]), id);
     await idb('songs', 'put', { id, title: job.title, url: j.url, song: meta, added: Date.now() });
     navigator.storage?.persist?.(); // ask the browser not to evict the library under storage pressure
-    library.push({ title: job.title, url: j.url, lib: id, meta }); rebuild(); say(`added ${job.title} · ${meta.bpm} BPM`);
-  } catch (err) { say(`${job.title}: ${err.message || err}`, 'err'); }
+    const entry = { title: job.title, url: j.url, lib: id, meta };
+    library.push(entry); rebuild(); say(`added ${job.title} · ${meta.bpm} BPM`); j.done?.(entry);
+  } catch (err) { say(`${job.title}: ${err.message || err}`, 'err'); j.failed?.(err); }
   nextJob();
 }
 async function removeSong(e) {
@@ -331,8 +335,8 @@ picker.onchange = () => { addFiles(picker.files); picker.value = ''; };
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', e => { e.preventDefault(); addFiles(e.dataTransfer.files); });
 
-if (dbp) idb('songs', 'getAll').then(rows => { library = rows.sort((a, b) => a.added - b.added).map(r => ({ title: r.title, url: r.url, lib: r.id, meta: r.song })); rebuild();
-  if (library.length && catalog[sel] === DEMO) sel = 0; showSelected(); }).catch(() => {});
+const libraryReady = dbp ? idb('songs', 'getAll').then(rows => { library = rows.sort((a, b) => a.added - b.added).map(r => ({ title: r.title, url: r.url, lib: r.id, meta: r.song })); rebuild();
+  if (library.length && catalog[sel] === DEMO) sel = 0; showSelected(); }).catch(() => {}) : Promise.resolve();
 fetch('songs/index.json').then(r => r.json()).then(list => { server = list; rebuild(); }).catch(() => {}); // no songs/ yet, or file:// — fine
 
 // Audius: search or browse trending, then queue a track like a dropped file. Tracks are used under the Audius
@@ -359,9 +363,7 @@ function findKey(e) {
   if (e.key === 'Escape') { mode = 'title'; showSelected(); }
   else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') au.sel = Math.max(0, Math.min(au.list.length - 1, au.sel + (e.key === 'ArrowUp' ? -1 : 1)));
   else if (e.key === 'Enter' && t) {
-    jobs.push({ title: `${t.title} — ${t.user.name}`, url: `https://audius.co${t.permalink}`,
-      bytes: () => fetch(`${AUDIUS}/${t.id}/stream?${APP}`).then(r => r.ok ? r.arrayBuffer() : Promise.reject(new Error(`Audius stream ${r.status}`))) });
-    if (!job) nextJob();
+    queueAudius(t);
     mode = 'title'; showSelected(); say(`adding ${t.title}`, 'info');
   } else if (e.key === 'Backspace' || e.key.length === 1) { // typing: search after a short pause
     au.q = e.key === 'Backspace' ? au.q.slice(0, -1) : (au.q + e.key).slice(0, 40);
@@ -369,6 +371,74 @@ function findKey(e) {
     clearTimeout(peekTimer); return peek?.pause(); // quiet while typing; the new results start their own preview
   } else return;
   e.preventDefault?.(); preview();
+}
+
+// Share only Audius provenance; no audio or local filenames leave this device.
+function audiusURL(value) {
+  try { const u = new URL(value); return u.protocol === 'https:' && u.hostname === 'audius.co' && !u.port && !u.username && !u.password && /^\/[^/]+\/[^/]+\/?$/.test(u.pathname) ? u.origin + u.pathname.replace(/\/$/, '') : null; }
+  catch { return null; }
+}
+function shareLink(e) {
+  const track = audiusURL(e?.url); if (!track) return null;
+  const u = new URL(location.href); u.search = ''; u.hash = ''; u.searchParams.set('audius', track); return u.href;
+}
+function trackDialog(title, message) {
+  const d = document.createElement('dialog'), heading = document.createElement('h2'), status = document.createElement('p'), close = document.createElement('button');
+  heading.textContent = title; status.textContent = message; status.setAttribute('role', 'status'); close.textContent = 'Close';
+  close.onclick = () => d.close(); d.onclose = () => d.remove();
+  d.append(heading, status, close); document.body.append(d); d.showModal(); return { d, status, close };
+}
+async function shareTrack(e) {
+  const url = shareLink(e); if (!url) return;
+  try { await navigator.clipboard.writeText(url); say('Track link copied'); }
+  catch { const { d } = trackDialog('Share this track', 'Copy this link and send it to a friend.');
+    const input = document.createElement('input'); input.value = url; input.readOnly = true; input.setAttribute('aria-label', 'Track link'); d.append(input); input.focus(); input.select(); }
+}
+function queueAudius(t, done, failed) {
+  jobs.push({ title: `${t.title} — ${t.user.name}`, url: audiusURL(`https://audius.co${t.permalink}`), done, failed,
+    bytes: () => fetch(`${AUDIUS}/${encodeURIComponent(t.id)}/stream?${APP}`).then(r => r.ok ? r.arrayBuffer() : Promise.reject(new Error(`Audius stream ${r.status}`))) });
+  if (!job) nextJob();
+}
+async function resolveSharedTrack(value) {
+  const url = audiusURL(value); if (!url) throw new Error('This is not an Audius track link.');
+  const r = await fetch(`https://api.audius.co/v1/resolve?url=${encodeURIComponent(url)}&${APP}`);
+  if (!r.ok) throw new Error(`Audius could not find this track (${r.status}).`);
+  const { data } = await r.json(), t = Array.isArray(data) ? data[0] : data;
+  if (!t || typeof t.id !== 'string' || !/^[a-zA-Z0-9]+$/.test(t.id) || !t.title || !t.user?.name || !audiusURL(`https://audius.co${t.permalink}`)) throw new Error('This link does not resolve to a track.');
+  if (!t.is_streamable || !t.access?.stream) throw new Error('This track is no longer available to stream.');
+  if (!(t.duration >= 30 && t.duration <= 600)) throw new Error('Tracks must be between 30 seconds and 10 minutes.');
+  return t;
+}
+async function openSharedTrack(value) {
+  const { d, status, close } = trackDialog('Shared track', 'Finding this track on Audius…');
+  try {
+    const [t] = await Promise.all([resolveSharedTrack(value), libraryReady]); if (!d.open) return;
+    status.textContent = `${t.title} — ${t.user.name}. Download and separate on this device, then play. First use also downloads the separation model.`;
+    const play = document.createElement('button'); play.textContent = 'Download & play'; d.insertBefore(play, close); play.focus();
+    play.onclick = async () => {
+      play.disabled = true;
+      let timer;
+      try {
+        if (!ac) initAudio();
+        await ac.resume(); stopPreview(); clearTimeout(pvTimer); pvN++;
+        status.textContent = 'Preparing track…';
+        const url = audiusURL(`https://audius.co${t.permalink}`);
+        let entry = library.find(e => audiusURL(e.url) === url);
+        if (!entry) {
+          timer = setInterval(() => { if (d.open) status.textContent = job ? `${job.title} · ${JOB_LABEL[job.phase] || job.phase} · ${Math.round((job.progress || 0) * 100)}%` : 'Waiting to import…'; }, 500);
+          entry = await new Promise((resolve, reject) => queueAudius(t, resolve, reject));
+        }
+        if (!d.open) return; // Closing leaves the import running, but cancels automatic playback.
+        sel = catalog.indexOf(entry); d.close();
+        if (!document.hidden) await start(); else { showSelected(); say('Shared track is ready — press Enter to play', 'info'); }
+      } catch (err) { status.textContent = err.message || String(err); play.disabled = false; play.textContent = 'Try again'; }
+      finally { clearInterval(timer); }
+    };
+  } catch (err) { if (d.open) status.textContent = err.message || String(err); }
+}
+if (globalThis.location) {
+  const shared = new URL(location.href).searchParams.get('audius');
+  if (shared) Promise.resolve().then(() => openSharedTrack(shared));
 }
 
 // ---------- audio ----------
@@ -477,7 +547,7 @@ function tryHit(lane) {
 }
 
 addEventListener('keydown', e => {
-  if (e.metaKey || e.ctrlKey) return;
+  if (e.metaKey || e.ctrlKey || document.querySelector?.('dialog[open]')) return;
   if (mode === 'find') return findKey(e); // before the global keys: the search box takes [ ] and letters
   if (e.repeat) return;
   const k = e.key.toLowerCase();
@@ -498,6 +568,7 @@ addEventListener('keydown', e => {
     else if (k === 'arrowdown' || k === 's') pick((sel + 1) % catalog.length);
     else if (k === 'enter' || k === ' ') start();
     else if (k === 't') chooseTheme(e.shiftKey);
+    else if (k === 'c') shareTrack(catalog[sel]);
     else if (k === 'o') picker.click();
     else if (k === 'f') { pick(catalog.indexOf(FIND)); start(); }
     else if (k === '?' || k === '/') help = true;
@@ -1213,6 +1284,11 @@ function drawCard() {
   box(R - 160, y + 22, 152, 26, 13, 'rgba(3,12,20,.85)', '#627f8f');
   text(`T · ${theme.name}`, R - 84, y + 40, `700 10px ${SANS}`, '#fff');
   zone(R - 160, y + 22, 152, 26, () => chooseTheme());
+  if (audiusURL(e.url)) {
+    box(L + 8, y + 22, 96, 26, 13, 'rgba(3,12,20,.85)', '#627f8f');
+    text('C · SHARE', L + 56, y + 40, `700 10px ${SANS}`, '#fff');
+    zone(L + 8, y + 22, 96, 26, () => shareTrack(e));
+  }
   const defaultY = y + h + 6;
   text(`Default: ${THEMES[themeSettings.default].name} · SHIFT T to update`, (L + R) / 2, defaultY + 14, `600 10px ${MONO}`, '#a6b6c8');
   zone(L, defaultY, R - L, 22, () => chooseTheme(true));

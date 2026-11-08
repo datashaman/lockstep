@@ -24,10 +24,11 @@ const context = vm.createContext({
   performance: { now: () => 0 }, matchMedia: () => motion,
   addEventListener() {}, requestAnimationFrame() {},
   fetch: () => Promise.reject(new Error('offline test')),
-  assert,
+  assert, URL,
 });
 const source = readFileSync(new URL('./index.html', import.meta.url), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
-vm.runInContext(source, context);
+// Allow the import tests to replace the IndexedDB boundary without a browser database.
+vm.runInContext(source.replace('const idb =', 'let idb ='), context);
 vm.runInContext(`
   mode = 'play'; rt = 10;
   assert.equal(captureLight(tracks[0], 0), 0);
@@ -455,3 +456,57 @@ for (const key of ['paper', 'circuit']) {
   assert.deepEqual(calls, still, 'new scenery has no continuous idle motion');
 }
 console.log('ok: four-theme cycle, new theme persistence, rendering, unchanged chart data and static scenery');
+
+context.location = { href: 'https://game.example/lockstep/?old=1#old' };
+await vm.runInContext(`(async () => {
+  assert.equal(shareLink({ title: 'local file' }), null);
+  for (const url of ['https://audius.co.evil.test/a/b', 'http://audius.co/a/b', 'https://evil.test/a/b', 'https://user@audius.co/a/b', 'https://audius.co/a']) assert.equal(audiusURL(url), null);
+  const sourceURL = 'https://audius.co/artist/song';
+  const link = new URL(shareLink({ url: sourceURL }));
+  assert.equal(link.origin + link.pathname, 'https://game.example/lockstep/');
+  assert.equal(link.searchParams.get('audius'), sourceURL); assert.equal(link.hash, ''); assert.equal(link.searchParams.size, 1);
+  let requests = [];
+  const track = { id: 'abc123', title: 'Shared song', user: { name: 'Artist' }, permalink: '/artist/song', duration: 120, is_streamable: true, access: { stream: true } };
+  fetch = async url => { requests.push(url); return { ok: true, json: async () => ({ data: [track] }) }; };
+  assert.equal(await resolveSharedTrack(sourceURL), track);
+  assert.ok(requests[0].startsWith('https://api.audius.co/v1/resolve?url='));
+  await assert.rejects(resolveSharedTrack('https://evil.test/song'), /not an Audius/); assert.equal(requests.length, 1);
+  track.access.stream = false; await assert.rejects(resolveSharedTrack(sourceURL), /no longer/); track.access.stream = true;
+  track.duration = 601; await assert.rejects(resolveSharedTrack(sourceURL), /10 minutes/); track.duration = 120;
+  fetch = async () => ({ ok: false, status: 404 }); await assert.rejects(resolveSharedTrack(sourceURL), /404/);
+
+  // Exercise real import completion, duplicate detection and error propagation.
+  crypto = { subtle: { digest: async () => new Uint8Array(32).buffer } };
+  OfflineAudioContext = class { async decodeAudioData() { return { numberOfChannels: 1, getChannelData: () => new Float32Array(4) }; } };
+  navigator = { storage: {} };
+  const writes = [];
+  idb = async (...args) => writes.push(args);
+  work = async () => ({ song: { bpm: 120, tracks: [] }, stems: {} });
+  library = []; jobs = []; job = null;
+  let imported;
+  jobs.push({ title: 'Shared song', url: sourceURL, bytes: async () => new ArrayBuffer(4), done: e => imported = e });
+  await nextJob(); assert.equal(imported.url, sourceURL); assert.equal(library.length, 1); assert.equal(writes.length, 2); assert.equal(job, null);
+  let duplicate;
+  jobs.push({ title: 'Shared song', bytes: async () => new ArrayBuffer(4), done: e => duplicate = e });
+  await nextJob(); assert.equal(duplicate, imported); assert.equal(writes.length, 2);
+  let failure;
+  jobs.push({ title: 'Broken', bytes: async () => { throw Error('offline'); }, failed: e => failure = e });
+  await nextJob(); assert.equal(failure.message, 'offline'); assert.equal(job, null);
+
+  // A closed landing prompt must never start a game when its import finishes.
+  let dialogOpen = true, button, closeDialog, pendingImport, played = 0;
+  const status = {};
+  trackDialog = () => ({ d: { get open() { return dialogOpen; }, insertBefore: b => button = b, close: () => { dialogOpen = false; } }, status, close: {} });
+  document.createElement = () => ({ focus() {} });
+  resolveSharedTrack = async () => track;
+  ac = { resume: async () => {} }; pv = []; pvGain = null; start = async () => played++;
+  setInterval = () => 1; clearInterval = () => {};
+  queueAudius = (t, done) => pendingImport = done;
+  library = [];
+  await openSharedTrack(sourceURL);
+  const preparing = button.onclick(); await Promise.resolve(); dialogOpen = false;
+  pendingImport(imported); await preparing; assert.equal(played, 0);
+  dialogOpen = true; library = [imported]; catalog = [imported];
+  await openSharedTrack(sourceURL); await button.onclick(); assert.equal(played, 1); assert.equal(sel, 0);
+})()`, context);
+console.log('ok: Audius-only share URLs, resolver validation, unavailable tracks, import completion/errors, deduplication, cancel and cached playback');
