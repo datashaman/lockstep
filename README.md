@@ -1,5 +1,7 @@
 # Lockstep
 
+**Play it:** https://datashaman.github.io/lockstep/
+
 A browser rhythm game where each instrument in a song is its own track. Hit a track's notes to bring that
 part in; nail a phrase to lock it and move to the next track. Inspired by the rhythm-action games of the
 PS2 era.
