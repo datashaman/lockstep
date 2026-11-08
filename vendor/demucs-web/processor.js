@@ -236,93 +236,91 @@ export class DemucsProcessor {
 
       const input = prepareModelInput(segLeft, segRight);
 
-      const waveformTensor = new this.ort.Tensor('float32', input.waveform, [1, 2, TRAINING_SAMPLES]);
-      const magSpecTensor = new this.ort.Tensor('float32', input.magSpec, [1, 4, MODEL_SPEC_BINS, MODEL_SPEC_FRAMES]);
+      let waveformTensor, magSpecTensor, inferResults;
+      try {
+        waveformTensor = new this.ort.Tensor('float32', input.waveform, [1, 2, TRAINING_SAMPLES]);
+        magSpecTensor = new this.ort.Tensor('float32', input.magSpec, [1, 4, MODEL_SPEC_BINS, MODEL_SPEC_FRAMES]);
 
-      const feeds = {};
-      feeds[this.session.inputNames[0]] = waveformTensor;
-      if (this.session.inputNames.length > 1) {
-        feeds[this.session.inputNames[1]] = magSpecTensor;
-      }
-
-      const inferResults = await this.session.run(feeds);
-
-      let timeData = null, timeShape = null;
-      let freqData = null;
-
-      for (const name of this.session.outputNames) {
-        const tensor = inferResults[name];
-        if (tensor.dims.length === 4 && tensor.dims[2] === 2) {
-          timeData = tensor.data;
-          timeShape = tensor.dims;
-        } else if (tensor.dims.length === 5 && tensor.dims[2] === 4) {
-          freqData = tensor.data;
+        const feeds = {};
+        feeds[this.session.inputNames[0]] = waveformTensor;
+        if (this.session.inputNames.length > 1) {
+          feeds[this.session.inputNames[1]] = magSpecTensor;
         }
-      }
 
-      if (!timeData) {
-        throw new Error('Could not find time-domain output tensor');
-      }
+        inferResults = await this.session.run(feeds);
 
-      let combinedOutputs = null;
-      if (freqData) {
-        const trackSpecs = standaloneMask(freqData);
-        combinedOutputs = [];
+        let timeData = null, timeShape = null;
+        let freqData = null;
 
-        for (let t = 0; t < 4; t++) {
-          const freqOutput = standaloneIspec(trackSpecs[t], TRAINING_SAMPLES);
-          const numChannels = timeShape[2];
-          const samples = timeShape[3];
-          const timeLeft = new Float32Array(samples);
-          const timeRight = new Float32Array(samples);
-
-          for (let i = 0; i < samples; i++) {
-            timeLeft[i] = timeData[t * numChannels * samples + 0 * samples + i];
-            timeRight[i] = timeData[t * numChannels * samples + 1 * samples + i];
+        for (const name of this.session.outputNames) {
+          const tensor = inferResults[name];
+          if (tensor.dims.length === 4 && tensor.dims[2] === 2) {
+            timeData = tensor.data;
+            timeShape = tensor.dims;
+          } else if (tensor.dims.length === 5 && tensor.dims[2] === 4) {
+            freqData = tensor.data;
           }
-
-          const combined = {
-            left: new Float32Array(samples),
-            right: new Float32Array(samples)
-          };
-          for (let i = 0; i < samples; i++) {
-            combined.left[i] = timeLeft[i] + (freqOutput.left[i] || 0);
-            combined.right[i] = timeRight[i] + (freqOutput.right[i] || 0);
-          }
-          combinedOutputs.push(combined);
         }
-      }
 
-      const numTracks = timeShape[1];
-      const numChannels = timeShape[2];
-      const samples = timeShape[3];
+        if (!timeData) {
+          throw new Error('Could not find time-domain output tensor');
+        }
 
-      const overlapWindow = new Float32Array(segmentLength);
-      for (let i = 0; i < segmentLength; i++) {
-        const fadeIn = Math.min(i / (stride * 0.5), 1);
-        const fadeOut = Math.min((segmentLength - i) / (stride * 0.5), 1);
-        overlapWindow[i] = Math.min(fadeIn, fadeOut);
-      }
+        let combinedOutputs = null;
+        if (freqData) {
+          const trackSpecs = standaloneMask(freqData);
+          combinedOutputs = [];
 
-      for (let t = 0; t < numTracks; t++) {
+          for (let t = 0; t < 4; t++) {
+            const freqOutput = standaloneIspec(trackSpecs[t], TRAINING_SAMPLES);
+            const numChannels = timeShape[2];
+            const samples = timeShape[3];
+            const combined = {
+              left: new Float32Array(samples),
+              right: new Float32Array(samples)
+            };
+            for (let i = 0; i < samples; i++) {
+              combined.left[i] = timeData[t * numChannels * samples + i] + (freqOutput.left[i] || 0);
+              combined.right[i] = timeData[t * numChannels * samples + samples + i] + (freqOutput.right[i] || 0);
+            }
+            combinedOutputs.push(combined);
+          }
+        }
+
+        const numTracks = timeShape[1];
+        const numChannels = timeShape[2];
+        const samples = timeShape[3];
+
+        const overlapWindow = new Float32Array(segmentLength);
+        for (let i = 0; i < segmentLength; i++) {
+          const fadeIn = Math.min(i / (stride * 0.5), 1);
+          const fadeOut = Math.min((segmentLength - i) / (stride * 0.5), 1);
+          overlapWindow[i] = Math.min(fadeIn, fadeOut);
+        }
+
+        for (let t = 0; t < numTracks; t++) {
+          for (let i = 0; i < segmentLength && start + i < totalSamples; i++) {
+            let leftVal, rightVal;
+            if (combinedOutputs) {
+              leftVal = combinedOutputs[t].left[i];
+              rightVal = combinedOutputs[t].right[i];
+            } else {
+              const leftIdx = t * numChannels * samples + 0 * samples + i;
+              const rightIdx = t * numChannels * samples + 1 * samples + i;
+              leftVal = timeData[leftIdx];
+              rightVal = timeData[rightIdx];
+            }
+            outputs[t].left[start + i] += leftVal * overlapWindow[i];
+            outputs[t].right[start + i] += rightVal * overlapWindow[i];
+          }
+        }
+
         for (let i = 0; i < segmentLength && start + i < totalSamples; i++) {
-          let leftVal, rightVal;
-          if (combinedOutputs) {
-            leftVal = combinedOutputs[t].left[i];
-            rightVal = combinedOutputs[t].right[i];
-          } else {
-            const leftIdx = t * numChannels * samples + 0 * samples + i;
-            const rightIdx = t * numChannels * samples + 1 * samples + i;
-            leftVal = timeData[leftIdx];
-            rightVal = timeData[rightIdx];
-          }
-          outputs[t].left[start + i] += leftVal * overlapWindow[i];
-          outputs[t].right[start + i] += rightVal * overlapWindow[i];
+          weights[start + i] += overlapWindow[i];
         }
-      }
-
-      for (let i = 0; i < segmentLength && start + i < totalSamples; i++) {
-        weights[start + i] += overlapWindow[i];
+      } finally {
+        // Inference resources must not accumulate across song chunks, including failed runs.
+        for (const tensor of new Set([waveformTensor, magSpecTensor, ...Object.values(inferResults || {})])) tensor?.dispose();
       }
 
       segmentIdx++;
