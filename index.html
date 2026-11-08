@@ -16,6 +16,7 @@ const W = 800, H = 600, HZ = 190, HIT_Y = 500, F = 0.8, LOOK = 4, TW = 168, GAP 
 const SANS = 'system-ui, sans-serif', MONO = 'ui-monospace, Menlo, monospace';
 const cv = document.getElementById('c'), g = cv.getContext('2d'), DPR = Math.min(2, globalThis.devicePixelRatio || 1);
 cv.width = W * DPR; cv.height = H * DPR;
+const reducedMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)');
 
 function rng(seed) { return () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32; }
 const PICK = {
@@ -449,6 +450,60 @@ function text(s, x, y, font, color, align = 'center', glow = 0) {
   g.fillText(s, x, y); g.shadowBlur = 0;
 }
 
+// Capture strength follows the existing lock lifetime; scenery never outlives its instrument.
+function captureLight(tr, t) {
+  if (!tr.notes.length || !locked(tr, t)) return 0;
+  return Math.max(0, Math.min(1, (rt - tr.capAt) / .65, tr.capTo - barF(t)));
+}
+function drawWorld(t, playing, vx, vy) {
+  const energy = tracks.map(tr => playing ? captureLight(tr, t) : 0);
+  const motion = reducedMotion?.matches ? 0 : barF(t), beat = reducedMotion?.matches ? .3 : pulse;
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  // Leave the note highway dark: sky details stop above the horizon, bass sits beneath it.
+  tracks.forEach((tr, i) => {
+    const e = energy[i]; if (!e) return;
+    g.strokeStyle = tr.color; g.fillStyle = tr.color; g.lineWidth = 1.5;
+    g.globalAlpha = e * (.2 + beat * .1);
+    if (i === 0) {
+      for (const side of [-1, 1]) for (let k = 0; k < 9; k++) {
+        const x = vx + side * (100 + k * 44), h = 18 + (1 + Math.sin(k * 1.7)) * 28 + beat * 22;
+        g.fillRect(x, vy - h, 8, h); g.strokeRect(x - 5, vy - h - 8, 18, h + 8);
+      }
+    } else if (i === 1) {
+      for (let k = 0; k < 5; k++) {
+        g.beginPath();
+        for (let x = -100; x <= W + 100; x += 12) {
+          const y = vy + 30 + k * 38 + Math.sin(x / 100 - motion * 2 + k * .7) * (9 + beat * 7);
+          if (x === -100) g.moveTo(x, y); else g.lineTo(x, y);
+        }
+        g.stroke();
+      }
+    } else if (i === 2) {
+      for (let k = 0; k < 3; k++) {
+        g.beginPath();
+        for (let x = -100; x <= W + 100; x += 10) {
+          const y = vy - 65 - k * 22 + Math.sin(x / 145 + motion * .7 + k * .6) * 24;
+          if (x === -100) g.moveTo(x, y); else g.lineTo(x, y);
+        }
+        g.stroke();
+      }
+    } else {
+      for (let k = 0; k < 5; k++) {
+        const x = vx + (k - 2) * 100, y = vy - 38 - Math.abs(k - 2) * 15, r = 20 + beat * 5;
+        g.beginPath(); g.moveTo(x, y - r); g.lineTo(x + r, y); g.lineTo(x, y + r); g.lineTo(x - r, y); g.closePath(); g.stroke();
+      }
+    }
+  });
+  const together = Math.max(0, energy.reduce((a, b) => a + b, 0) - 1) / 3;
+  if (together > 0) {
+    const glow = g.createRadialGradient(vx, vy, 0, vx, vy, 230);
+    glow.addColorStop(0, '#e5faff'); glow.addColorStop(.25, `hsla(${hue},90%,70%,.5)`); glow.addColorStop(1, 'transparent');
+    g.globalAlpha = together * (.35 + beat * .15); g.fillStyle = glow; g.fillRect(vx - 230, vy - 230, 460, 460);
+  }
+  g.restore();
+}
+
 function draw(t, playing) {
   const b = bar(t), dh = ((HUES[b % 4] - hue) % 360 + 540) % 360 - 180;
   hue += dh * .04;
@@ -484,6 +539,8 @@ function draw(t, playing) {
   g.fillStyle = ground; g.fillRect(-200, vy, W + 400, H + 200);
   g.fillStyle = `hsla(${hue},90%,72%,${.45 + pulse * .55})`; g.fillRect(-200, vy - 1, W + 400, 2);
 
+  drawWorld(t, playing, vx, vy);
+
   const ph = Math.floor(b / 2);
   tracks.forEach((tr, i) => {
     const cx = trackX(i), x0 = cx - TW / 2, x1 = cx + TW / 2, capd = locked(tr, t), me = i === cur && playing, since = rt - tr.capAt;
@@ -491,7 +548,15 @@ function draw(t, playing) {
     const fl = g.createLinearGradient(0, HZ, 0, HIT_Y); fl.addColorStop(0, 'rgba(0,0,0,0)'); fl.addColorStop(1, tr.color);
     g.globalAlpha = me ? .24 : capd ? .1 + .08 * pulse : .07; g.fillStyle = fl; quad(x0, x1, -.35, LOOK); g.fill();
     g.globalCompositeOperation = 'lighter';
-    if (since < .8) { const d = since * 6; g.globalAlpha = 1 - since / .8; g.fillStyle = tr.color; quad(x0, x1, d - .15, d + .15); g.fill(); }
+    if (playing && capd) {
+      const light = captureLight(tr, t);
+      g.globalAlpha = light * .5; g.fillStyle = tr.color;
+      quad(x0, x0 + 5, 0, LOOK); g.fill(); quad(x1 - 5, x1, 0, LOOK); g.fill();
+      if (!reducedMotion?.matches && since >= 0 && since < .65) {
+        const d = since / .65 * LOOK;
+        g.globalAlpha = 1 - since / .65; g.fillStyle = '#fff'; quad(x0, x1, d - .045, d + .045); g.fill();
+      }
+    }
     // rails, lane dividers, beat lines
     g.strokeStyle = tr.color;
     g.globalAlpha = me ? .95 : .35; g.lineWidth = me ? 3 : 1.5; seg(x0, -.35, x0, LOOK); seg(x1, -.35, x1, LOOK);
@@ -532,6 +597,16 @@ function draw(t, playing) {
     }
   });
 
+  if (playing && locked(tracks[cur], t) && !reducedMotion?.matches) {
+    const age = rt - tracks[cur].capAt, right = next(1, t), target = right >= 0 ? right : next(-1, t);
+    if (target >= 0 && age >= .65 && age < 1.35) {
+      const q = (age - .65) / .7, from = sx(trackX(cur)), to = sx(trackX(target)), x = from + (to - from) * (1 - (1 - q) ** 3);
+      g.globalAlpha = Math.sin(q * Math.PI) * .8; g.strokeStyle = tracks[target].color; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(from, HIT_Y - 16); g.lineTo(x, HIT_Y - 16); g.stroke();
+      const dir = Math.sign(to - from); g.beginPath(); g.moveTo(x - dir * 8, HIT_Y - 22); g.lineTo(x, HIT_Y - 16); g.lineTo(x - dir * 8, HIT_Y - 10); g.stroke();
+      g.globalAlpha = 1;
+    }
+  }
   g.globalCompositeOperation = 'lighter';
   for (const r of rings) { const a = (rt - r.born) / .7; g.globalAlpha = 1 - a; g.strokeStyle = r.color; g.lineWidth = 8 * (1 - a);
     g.beginPath(); g.ellipse(sx(r.x), HIT_Y, 30 + a * 520, (30 + a * 520) * .35, 0, 0, 7); g.stroke(); }

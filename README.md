@@ -53,6 +53,7 @@ Do not commit songs you don't own the rights to; `.gitignore` keeps everything b
 
 ```sh
 node analyze.test.mjs   # charting against synthetic stems with a known grid
+node render.test.mjs    # capture scenery lifecycle and renderer smoke checks
 ```
 
 ## License
