@@ -248,7 +248,7 @@ function saveBest() {
   if (newBest) { best[k] = { score, grade: grade(hits / Math.max(1, hits + misses)) }; try { localStorage.lockstepBest = JSON.stringify(best); } catch {} }
 }
 // Refresh cached copies of the worker's modules first (an older server let browsers keep stale ones), then read the chart version.
-Promise.all(['analyze.js', 'separator.js', 'vendor/demucs-web/fft.js'].map(f => globalThis.fetch?.(f, { cache: 'no-cache' }).catch(() => {})))
+Promise.all(['analyze.js', 'separator.js', 'vendor/demucs-web/fft.js', 'vendor/demucs-web/processor.js'].map(f => globalThis.fetch?.(f, { cache: 'no-cache' }).catch(() => {})))
   .then(() => import('./analyze.js')).then(m => CHART_V = m.CHART_V).catch(() => {});
 const pending = new Map();
 function releaseWorker() {
