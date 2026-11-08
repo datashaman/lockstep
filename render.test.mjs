@@ -137,7 +137,7 @@ assert.deepEqual(calls, quietSleeve, 'stopped preview keeps the sleeve still');
 console.log('ok: sleeve bins, empty stems, caching, difficulty stability, menu controls, loading and reduced motion');
 
 const composites = [], scoreOpacity = [];
-canvas.drawImage = (...args) => { record('drawImage', args); composites.push(canvas.globalAlpha); };
+canvas.drawImage = (...args) => { record('drawImage', args); if (args[1] === 0) composites.push(canvas.globalAlpha); };
 canvas.fillText = (...args) => { record('fillText', args); if (args[0] === 'SCORE') scoreOpacity.push(canvas.globalAlpha); };
 context.document.createElement = () => ({ width: 0, height: 0, getContext: () => canvas });
 context.clearTimeout = () => {};
