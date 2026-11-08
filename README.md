@@ -65,6 +65,7 @@ Do not commit songs you don't own the rights to; `.gitignore` keeps everything b
 
 ```sh
 node analyze.test.mjs   # charting against synthetic stems with a known grid
+node separation.test.mjs # chunk tensor cleanup, reconstruction and failure paths
 node render.test.mjs    # gameplay and renderer checks
 node performance.test.mjs # repeated-play resource checks and chart-work measurements
 node materials.test.mjs # bounded texture cache and scenery draw cost
