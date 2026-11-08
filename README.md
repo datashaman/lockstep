@@ -88,3 +88,13 @@ Theme materials are generated once at 400×300 and cached: neon scanlines/reflec
 Captures trigger brief theme-specific scenery effects: neon sweeps, water ripples, ink blooms and travelling circuit pulses. Liquid caustics drift slowly; reduced-motion mode freezes that drift and suppresses capture animations. Effects reuse capture timestamps and expire after 1.6 seconds without particle queues.
 
 Liquid Dream additionally uses a single WebGL background pass for flowing colour, caustic light and capture-driven refraction. It renders at 320×240, at most 30 times per second, into a reusable Canvas surface; gameplay and text stay in the original crisp renderer. Other themes do not run it. Reduced motion renders one still shader frame. If WebGL is unavailable, compilation fails or the context is lost, the cached liquid texture remains available; a restored context rebuilds its GPU resources.
+
+## Tablet touch controls
+
+Landscape tablets get a touch dock below the game, keeping fingers away from the timing line. Left / Middle / Right hit the three lanes immediately on touch-down and accept simultaneous touches. Separate Track arrows switch instruments; Pause opens resume, restart and song-selection controls. Rotating into portrait while playing pauses the game.
+
+The dock also offers native song and difficulty selectors, Audius search, file import, theme switching and Audius sharing. Settings contains audio calibration (±10 ms), default theme and the existing two-step song deletion. Keyboard controls remain available. Touch controls appear on devices advertising a coarse pointer; buttons have at least 44-pixel targets and the layout accounts for screen safe areas.
+
+This is the landscape-tablet pass. Phone menus retain the scaled two-panel canvas; portrait shows landscape guidance. Real-device touch/audio latency and mobile stem-separation limits still need testing. Keep the browser foregrounded while importing a track.
+
+Run `node touch.test.mjs` for pointer, cancellation, shared input and calibration checks.
