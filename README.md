@@ -29,15 +29,19 @@ The first song you add downloads the ~180 MB separation model once.
 
 | Key | Title screen | In game |
 | --- | --- | --- |
-| ↑ ↓ | pick a song | |
+| ↑ ↓ | pick a song (it plays quietly behind the menu) | |
 | ← → | difficulty | switch track (also A / D) |
 | Enter / Space | play | |
-| O | add a song | |
-| Enter on *Find a song on Audius* | search Audius: type, ↑ ↓ (plays a preview), Enter to add, Esc back | |
+| O | add audio files (or drop them anywhere) | |
+| F | find a song on Audius: type to search, ↑ ↓ previews, Enter adds, Esc back | |
 | X twice | delete a song | |
 | `[` `]` | audio offset | |
+| ? | all controls | |
 | J K L | | hit lanes |
 | Esc | | back to title |
+
+The title screen also works with the mouse: click a song to select it and again to play, or click the buttons.
+Your best grade and score for each song and difficulty are kept in this browser.
 
 ## Offline charting (optional)
 
