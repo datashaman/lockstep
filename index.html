@@ -75,6 +75,7 @@ function applyTheme(e) {
   theme = Object.hasOwn(THEMES, key) ? THEMES[key] : THEMES.neon;
   tracks?.forEach((tr, i) => tr.color = theme.colors[i]);
   materialTexture(); // warm on selection, before gameplay begins
+  if (isLiquid()) prepareLiquidShader();
 }
 function chooseTheme(useAsDefault = false) {
   const e = catalog[sel]; if (!e || e.add || e.find) return;
@@ -877,10 +878,28 @@ function clipScenery(vx, vy) {
   g.moveTo(-200, vy); g.lineTo(vx - 35, vy); g.lineTo(vx - 430, H + 200); g.lineTo(-200, H + 200); g.closePath();
   g.moveTo(vx + 35, vy); g.lineTo(W + 200, vy); g.lineTo(W + 200, H + 200); g.lineTo(vx + 430, H + 200); g.closePath(); g.clip();
 }
-function drawMaterial(vx, vy, t = 0) {
-  const surface = materialTexture(); if (!surface) return;
+let liquidShader = null, liquidShaderRequested = false;
+const liquidCaptures = new Float32Array(4);
+function prepareLiquidShader() {
+  if (liquidShaderRequested || !globalThis.WebGLRenderingContext) return;
+  liquidShaderRequested = true;
+  import('./liquid-shader.js').then(m => { liquidShader = m.createLiquidShader(); }).catch(() => {});
+}
+function drawMaterial(vx, vy, t = 0, playing = false) {
+  let surface = null;
+  if (isLiquid() && liquidShader) {
+    let energy = 0;
+    tracks.forEach((tr, i) => {
+      const active = playing && tr.notes.length && locked(tr, t);
+      liquidCaptures[i] = active ? rt - tr.capAt : -1;
+      if (active) energy += captureLight(tr, t) / 4;
+    });
+    surface = liquidShader.render(rt, liquidCaptures, energy, !!reducedMotion?.matches);
+  }
+  const shaded = !!surface;
+  surface ||= materialTexture(); if (!surface) return;
   g.save(); clipScenery(vx, vy); g.globalCompositeOperation = 'source-over'; g.globalAlpha = isPaper() ? .75 : .65;
-  const drift = isLiquid() && !reducedMotion?.matches ? Math.sin(barF(t) * .3) * 18 : 0;
+  const drift = !shaded && isLiquid() && !reducedMotion?.matches ? Math.sin(barF(t) * .3) * 18 : 0;
   g.drawImage(surface, -100 + drift, -100 + drift * .4, W + 200, H + 200); g.restore();
 }
 
@@ -1155,7 +1174,7 @@ function draw(t, playing) {
   g.fillStyle = `hsla(${hue},90%,72%,${.45 + pulse * .55})`; g.fillRect(-200, vy - 1, W + 400, 2);
 
   drawWorld(t, playing, vx, vy);
-  drawMaterial(vx, vy, t);
+  drawMaterial(vx, vy, t, playing);
   drawCaptureMaterial(t, playing, vx, vy);
 
   const ph = Math.floor(b / 2);
