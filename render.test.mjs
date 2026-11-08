@@ -171,3 +171,32 @@ vm.runInContext(`
   move(-1); assert.equal(cur, 1, 'can move when every populated track is auto');
 `, context);
 console.log('ok: auto-track entry, exit and re-entry, capture intact, silent tracks and boundaries');
+
+vm.runInContext(`
+  song = demoSong(); song.synth = false; ac = { currentTime: 0 }; reset(); t0 = 0; offset = 0;
+  captureSfx = () => {}; tone = () => {}; rt = 40;
+  const note = t => ({ t, lane: 0, bar: 0, hit: false, missed: false });
+  tracks[0].notes = [note(0), note(1)]; tracks[1].notes = [note(0)];
+  tracks[2].notes = [note(1)]; tracks[3].notes = [];
+  cur = 0; tryHit(0); assert.equal(tracks[0].hits, 1);
+  cur = 1; tryHit(0); assert.equal(tracks[1].caps, 1);
+  const capturedUntil = tracks[1].capTo;
+  cur = 0; logic(1.3);
+  assert.equal(tracks[0].misses, 1);
+  assert.equal(tracks[2].misses, 0, 'inactive notes are not counted as manual misses');
+  assert.equal(tracks.reduce((n, tr) => n + tr.hits, 0), hits);
+  assert.equal(tracks.reduce((n, tr) => n + tr.misses, 0), misses);
+  assert.equal(tracks.reduce((n, tr) => n + tr.caps, 0), caps);
+  assert.equal(captureRemaining(tracks[1], 0), 1);
+  assert.equal(captureRemaining(tracks[1], BARLEN * (capturedUntil - 4)), .5);
+  assert.equal(captureRemaining(tracks[1], BARLEN * capturedUntil), 0);
+  assert.equal(captureRemaining(tracks[1], BARLEN * (capturedUntil + 2)), 0);
+  mode = 'over'; saveBest(); drawResults();
+`, context);
+assert.ok(calls.some(([name, text]) => name === 'fillText' && text === 'UNPLAYED'));
+assert.ok(calls.some(([name, text]) => name === 'fillText' && text === 'SILENT'));
+vm.runInContext(`
+  newBest = false; drawResults();
+  reset(); assert.ok(tracks.every(tr => tr.hits === 0 && tr.misses === 0 && tr.caps === 0));
+`, context);
+console.log('ok: per-instrument totals match scorekeeping, inactive notes excluded, capture drain, results states and restart');
