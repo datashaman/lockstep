@@ -17,9 +17,10 @@ for (const name of ['createLinearGradient', 'createRadialGradient']) canvas[name
 };
 canvas.measureText = text => ({ width: text.length * 7 });
 const motion = { matches: false };
+const events = {};
 const context = vm.createContext({
   console: { ...console, assert: (value, ...message) => assert.ok(value, message.join(' ')) },
-  document: { getElementById: () => ({ getContext: () => canvas, addEventListener() {} }) },
+  document: { addEventListener: (name, fn) => events[name] = fn, getElementById: () => ({ getContext: () => canvas, addEventListener() {} }) },
   performance: { now: () => 0 }, matchMedia: () => motion,
   addEventListener() {}, requestAnimationFrame() {},
   fetch: () => Promise.reject(new Error('offline test')),
@@ -132,7 +133,7 @@ canvas.drawImage = (...args) => { record('drawImage', args); composites.push(can
 canvas.fillText = (...args) => { record('fillText', args); if (args[0] === 'SCORE') scoreOpacity.push(canvas.globalAlpha); };
 context.document.createElement = () => ({ width: 0, height: 0, getContext: () => canvas });
 context.clearTimeout = () => {};
-vm.runInContext("catalog = [DEMO]; sel = 0; mode = 'title'; ac = { currentTime: 20 }; camX = 100;", context);
+vm.runInContext("catalog = [DEMO]; sel = 0; mode = 'title'; rt = 0; ac = { currentTime: 20 }; camX = 100;", context);
 await vm.runInContext('start()', context);
 vm.runInContext(`
   assert.equal(mode, 'play'); assert.ok(entrance);
@@ -230,3 +231,40 @@ vm.runInContext(`
   reset(); assert.equal(inSync, false); assert.equal(syncAt, -9);
 `, context);
 console.log('ok: sync entry, no repeated trigger, expiry, recapture, silent/empty tracks, unchanged score, reduced motion and restart');
+
+let wallTime = 100;
+context.performance.now = () => wallTime * 1000;
+vm.runInContext(`
+  ac = { currentTime: 10, state: 'running', suspend: async () => { ac.state = 'suspended'; }, resume: async () => { ac.state = 'running'; } };
+  reset(); t0 = 0; sched = 10.1; rt = 100; visualOffset = 0;
+  score = 1234; tracks[0].capTo = 8;
+  pauseGame(); assert.equal(mode, 'pause'); assert.equal(ac.state, 'suspended');
+  assert.equal(score, 1234); assert.equal(tracks[0].capTo, 8);
+`, context);
+wallTime = 115;
+vm.runInContext(`
+  frame(); assert.equal(rt, 100); assert.equal(now(), 10); assert.equal(sched, 10.1);
+  resumeCountdown(); assert.equal(pauseState.deadline, 118);
+`, context);
+context.document.hidden = true;
+events.visibilitychange();
+vm.runInContext('assert.equal(pauseState.deadline, 0); assert.equal(mode, "pause")', context);
+context.document.hidden = false;
+wallTime = 120;
+await vm.runInContext('resumeGame()', context);
+vm.runInContext(`
+  assert.equal(mode, 'play'); assert.equal(visualOffset, 20); assert.equal(now(), 10);
+  assert.equal(t0, 0); assert.equal(sched, 10.1); assert.equal(score, 1234); assert.equal(tracks[0].capTo, 8);
+  pauseGame();
+`, context);
+wallTime = 125;
+await vm.runInContext("resumeGame('restart')", context);
+vm.runInContext(`
+  assert.equal(mode, 'play'); assert.equal(score, 0); assert.equal(t0, ac.currentTime + LEAD_IN);
+  pauseGame(); ac.resume = async () => { throw new Error('audio unavailable'); };
+`, context);
+await vm.runInContext('resumeGame()', context);
+vm.runInContext(`
+  assert.equal(mode, 'pause'); assert.equal(pauseState.busy, false); assert.equal(pauseState.deadline, 0);
+`, context);
+console.log('ok: pause freezes song/effects, preserves score/captures/scheduler, countdown cancellation, restart and resume failure');

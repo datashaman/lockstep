@@ -53,6 +53,7 @@ let beats, bars, gridDown;
 let hits = 0, misses = 0, caps = 0, shown = 0, rt = 0, last = performance.now() / 1000, phase = 0, pulse = 0;
 let camX = 0, camTo = 0, bendX = 0, bendY = 0, bendAmp = .6, hue = HUES[0], shake = 0, missAt = -9, flash = null;
 let dash = null, entrance = null, inSync = false, syncAt = -9;
+let pauseState = null, visualOffset = 0;
 let parts = [], pops = [], rings = [], press = [-9, -9, -9], laneHit = new Array(12).fill(-9);
 const stars = Array.from({ length: 220 }, () => ({ x: Math.random() * 2 - 1, y: Math.random() * 2 - 1, z: Math.random() }));
 const LIVE = 1, CUE = .35, GHOST = .2; // stem volume: playing well / your track before a hit / other tracks (GHOST high enough to mask separation artifacts)
@@ -98,7 +99,7 @@ const stopStems = () => { srcs.forEach(s => s.stop()); srcs = []; };
 function reset(menuImage = null) {
   setGrid(song); tracks = buildTracks(); cur = Math.max(0, tracks.findIndex(tr => tr.notes.length)); score = 0; mult = 1; mode = 'play'; hits = misses = caps = 0; shown = 0;
   parts = []; pops = []; rings = []; flash = null; dash = null; laneHit.fill(-9); inSync = false; syncAt = -9;
-  entrance = menuImage ? { image: menuImage, at: performance.now() / 1000 } : null;
+  entrance = menuImage ? { image: menuImage, at: rt } : null;
   if (menuImage && reducedMotion?.matches) camX = camTo = trackX(cur);
   t0 = ac.currentTime + LEAD_IN; sched = -LEAD_IN;
   stopStems();
@@ -375,6 +376,12 @@ addEventListener('keydown', e => {
   if (mode === 'find') return findKey(e); // before the global keys: the search box takes [ ] and letters
   if (e.repeat) return;
   const k = e.key.toLowerCase();
+  if (mode === 'pause') {
+    e.preventDefault?.();
+    if (k === ' ' || k === 'enter') { if (pauseState.deadline) pauseState.deadline = 0; else resumeCountdown(); }
+    else if (k === 'r') resumeGame('restart'); else if (k === 'escape') resumeGame('menu');
+    return;
+  }
   if (k === '[' || k === ']') { // calibration: raise if notes feel early vs the music, lower if late
     offset = Math.round((offset + (k === ']' ? .01 : -.01)) * 100) / 100; offsetAt = rt;
     if (globalThis.localStorage) localStorage.lockstepOffset = offset; return; }
@@ -395,11 +402,59 @@ addEventListener('keydown', e => {
   if (mode === 'over') { if (k === ' ') reset(); else if (k === 'escape') toTitle(); return; }
   if (mode !== 'play') return;
   const lane = 'jkl'.indexOf(k);
-  if (k === 'escape') toTitle();
+  if (k === ' ' || k === 'escape') { e.preventDefault?.(); pauseGame(); }
   else if (lane >= 0) tryHit(lane);
   else if (k === 'a' || k === 'arrowleft') move(-1);
   else if (k === 'd' || k === 'arrowright') move(1);
 });
+
+function pauseGame() {
+  if (mode === 'pause') { pauseState.deadline = 0; return; }
+  if (mode !== 'play') return;
+  const image = document.createElement('canvas'); image.width = cv.width; image.height = cv.height;
+  image.getContext('2d').drawImage(cv, 0, 0);
+  const state = { image, at: performance.now() / 1000, deadline: 0, busy: false };
+  pauseState = state; mode = 'pause';
+  state.ready = ac.suspend().catch(err => {
+    if (pauseState === state) { mode = 'play'; pauseState = null; say(`could not pause: ${err.message || err}`, 'err'); }
+  });
+}
+async function resumeGame(action = null) {
+  const state = pauseState; if (!state || state.busy) return;
+  state.busy = true;
+  await state.ready;
+  if (pauseState !== state) return;
+  try {
+    await ac.resume();
+    if (document.hidden) { await ac.suspend(); state.busy = false; state.deadline = 0; return; }
+    visualOffset += performance.now() / 1000 - state.at;
+    pauseState = null; mode = 'play';
+    if (action === 'restart') reset(); else if (action === 'menu') toTitle();
+  } catch (err) {
+    state.busy = false; state.deadline = 0; say(`could not resume: ${err.message || err}`, 'err');
+  }
+}
+function resumeCountdown() {
+  if (pauseState && !pauseState.busy && !pauseState.deadline && !document.hidden) pauseState.deadline = performance.now() / 1000 + 3;
+}
+document.addEventListener?.('visibilitychange', () => { if (document.hidden) pauseGame(); });
+function drawPause() {
+  const state = pauseState;
+  g.setTransform(DPR, 0, 0, DPR, 0, 0); g.globalAlpha = 1; g.drawImage(state.image, 0, 0, W, H);
+  g.fillStyle = 'rgba(3,2,6,.82)'; g.fillRect(0, 0, W, H);
+  const remaining = state.deadline ? Math.max(0, state.deadline - performance.now() / 1000) : 0;
+  text(state.deadline ? String(Math.ceil(remaining)) : 'PAUSED', W / 2, 245, `italic 900 64px ${SANS}`, '#fff');
+  text(fit(song.title, 640, `600 18px ${SANS}`), W / 2, 290, `600 18px ${SANS}`, '#a6b6c8');
+  zones = [];
+  if (!state.deadline && !state.busy) {
+    [['SPACE / ENTER   Resume', resumeCountdown], ['R   Restart', () => resumeGame('restart')], ['ESC   Song selection', () => resumeGame('menu')]].forEach(([label, fn], i) => {
+      const y = 325 + i * 54; box(220, y, 360, 44, 8, 'rgba(255,255,255,.08)', 'rgba(255,255,255,.2)');
+      text(label, W / 2, y + 28, `700 15px ${MONO}`, '#fff'); zone(220, y, 360, 44, fn);
+    });
+  } else text(state.busy ? 'Resuming audio…' : 'SPACE   cancel countdown', W / 2, 370, `600 14px ${MONO}`, '#a6b6c8');
+  if (state.deadline && remaining <= 0 && !state.busy) resumeGame();
+  drawToast();
+}
 
 function updateSync(t) {
   const active = tracks.filter(tr => tr.notes.length);
@@ -431,7 +486,9 @@ function logic(t) {
 }
 
 function frame() {
-  rt = performance.now() / 1000; const fdt = Math.min(.05, rt - last); last = rt;
+  const wall = performance.now() / 1000, fdt = Math.min(.05, wall - last); last = wall;
+  if (mode === 'pause') { drawPause(); requestAnimationFrame(frame); return; }
+  rt = wall - visualOffset;
   const playing = mode === 'play' || mode === 'over', t = playing ? now() : attract(); // attract mode on title
   if (mode === 'play') logic(t);
   const bi = idx(beats, t);
@@ -898,7 +955,7 @@ function drawHelp() {
   text('CONTROLS', W / 2, 84, `italic 900 34px ${SANS}`, '#fff', 'center', 20);
   [['MENU'], ['↑ ↓', 'choose a song'], ['← →', 'difficulty'], ['ENTER', 'play  (or click the song twice)'], ['O', 'add audio files, or drop them anywhere'],
    ['F', 'find a song on Audius'], ['X  X', 'delete a song from your library'], ['[  ]', 'audio offset: raise if notes feel early, lower if late'],
-   ['PLAYING'], ['J  K  L', 'hit the left, middle and right lane'], ['A  D', 'switch track, including AUTO (or ← →)'], ['ESC', 'back to the menu'], ['SPACE', 'play again, on the results screen']]
+   ['PLAYING'], ['J  K  L', 'hit the left, middle and right lane'], ['A  D', 'switch track, including AUTO (or ← →)'], ['SPACE / ESC', 'pause · resume, restart or return to menu'], ['SPACE', 'play again, on the results screen']]
     .forEach(([k, s], i) => { const y = 128 + i * 28 + (i > 7 ? 10 : 0);
       if (!s) text(k, 150, y, `800 10px ${MONO}`, `hsl(${hue},90%,78%)`, 'left');
       else { text(k, 290, y, `800 13px ${MONO}`, '#fff', 'right'); text(s, 312, y, `500 14px ${SANS}`, 'rgba(255,255,255,.75)', 'left'); } });
@@ -907,8 +964,8 @@ function drawHelp() {
 }
 // Mouse: click a song to select it, again to play; the buttons, difficulty switch and PLAY all click too.
 const at = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height]; };
-const zoneAt = (x, y) => mode === 'title' ? zones.findLast(z => x >= z.x && x < z.x + z.w && y >= z.y && y < z.y + z.h) : null;
-cv.addEventListener?.('click', e => { if (mode !== 'title') return; if (!ac) { initAudio(); showSelected(); } zoneAt(...at(e))?.fn(); });
+const zoneAt = (x, y) => (mode === 'title' || mode === 'pause') ? zones.findLast(z => x >= z.x && x < z.x + z.w && y >= z.y && y < z.y + z.h) : null;
+cv.addEventListener?.('click', e => { if (mode !== 'title' && mode !== 'pause') return; if (!ac) { initAudio(); showSelected(); } zoneAt(...at(e))?.fn(); });
 cv.addEventListener?.('mousemove', e => cv.style.cursor = zoneAt(...at(e)) ? 'pointer' : 'default');
 
 function drawFind() {
