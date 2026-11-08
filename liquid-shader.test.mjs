@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { createLiquidShader } from './liquid-shader.js';
+import { createThemeShader, THEME_FRAGMENTS } from './theme-shaders.js';
 
-function harness({ unsupported = false, compile = true, link = true } = {}) {
+function harness({ unsupported = false, compile = true, link = true, factory = createLiquidShader } = {}) {
   let draws = 0, copies = 0, canvases = 0, buffers = 0, programs = 0, deletedShaders = 0, lost = false;
   const events = {}, values = {};
   const gl = new Proxy({
@@ -24,7 +25,7 @@ function harness({ unsupported = false, compile = true, link = true } = {}) {
       },
     };
   };
-  const shader = createLiquidShader(create);
+  const shader = factory(create);
   return { shader, events, values, stats: () => ({ draws, copies, canvases, buffers, programs, deletedShaders }),
     lose() { lost = true; events.webglcontextlost({ preventDefault() {} }); buffers = programs = 0; },
     restore() { lost = false; events.webglcontextrestored(); } };
@@ -50,3 +51,19 @@ for (const options of [{ unsupported: true }, { compile: false }, { link: false 
   assert.equal(failed.stats().programs, 0); assert.equal(failed.stats().buffers, 0);
 }
 console.log('ok: 30 fps ceiling, stable GPU resources across 20 plays, immediate frame copy, reduced motion, unsupported/compile/link fallback and context restoration');
+
+const themes = harness({ factory: createThemeShader });
+const keys = Object.keys(THEME_FRAGMENTS);
+for (let play = 0; play < 20; play++) for (const key of keys) {
+  themes.shader.select(key);
+  assert.ok(themes.shader.render(key, 1, ages, .5));
+  assert.equal(themes.stats().buffers, 1, 'switch releases the old buffer');
+  assert.equal(themes.stats().programs, 1, 'switch releases the old program');
+}
+assert.equal(themes.stats().canvases, 2, 'all themes share one WebGL context and copy surface');
+assert.equal(themes.stats().draws, 20 * keys.length, 'switch invalidates cached image even in the same time slot');
+assert.equal(themes.shader.render('unknown', 2, ages, 0), null);
+assert.equal(themes.shader.render('__proto__', 2, ages, 0), null);
+themes.lose(); assert.equal(themes.shader.render(keys[0], 2, ages, 0), null);
+themes.restore(); assert.ok(themes.shader.render(keys[0], 2, ages, 0));
+console.log('ok: theme switching retains one program/buffer and two surfaces, refreshes cached output, rejects unknown themes and restores the selected shader');

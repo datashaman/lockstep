@@ -92,16 +92,16 @@ vm.runInContext(`
   tracks.forEach(tr => { tr.capFrom = 0; tr.capTo = 8; tr.capAt = 10; });
   let shaderCalls = 0;
   const shaderSurface = { shader: true };
-  liquidShader = { render(time, ages, energy, still) {
-    shaderCalls++; assert.equal(time, rt); assert.ok(energy > 0); assert.equal(still, false);
+  themeShader = { render(key, time, ages, energy, still) {
+    shaderCalls++; assert.equal(key, 'liquid'); assert.equal(time, rt); assert.ok(energy > 0); assert.equal(still, false);
     assert.ok(Math.abs(ages[0] - .4) < .001); return shaderSurface;
   } };
   drawMaterial(400, 190, 0, true);
   assert.equal(shaderCalls, 1);
-  theme = THEMES.neon; drawMaterial(400, 190, 0, true); assert.equal(shaderCalls, 1, 'other themes never render the shader');
-  theme = THEMES.liquid; liquidShader = { render: () => null };
+  theme = THEMES.neon; themeShader = { render: key => { assert.equal(key, 'neon'); return shaderSurface; } }; drawMaterial(400, 190, 0, true);
+  theme = THEMES.liquid; themeShader = { render: () => null };
 `, context);
 calls.length = 0;
 vm.runInContext('drawMaterial(400, 190, 0, true)', context);
 assert.equal(calls.find(([key]) => key === 'drawImage')[1], vm.runInContext('materialTexture(THEMES.liquid)', context), 'context loss uses existing liquid texture');
-console.log('ok: shader receives capture state only in Liquid Dream, Canvas fallback remains drawable');
+console.log('ok: shader receives the active theme and capture state, Canvas fallback remains drawable');
