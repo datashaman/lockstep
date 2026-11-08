@@ -93,7 +93,7 @@ const buildTracks = () => song.tracks.map((tr, i) => ({ name: tr.name, kind: tr.
 
 const stopStems = () => { srcs.forEach(s => s.stop()); srcs = []; };
 function reset() {
-  setGrid(song); tracks = buildTracks(); cur = 0; score = 0; mult = 1; mode = 'play'; hits = misses = caps = 0; shown = 0;
+  setGrid(song); tracks = buildTracks(); cur = Math.max(0, tracks.findIndex(tr => tr.notes.length)); score = 0; mult = 1; mode = 'play'; hits = misses = caps = 0; shown = 0;
   parts = []; pops = []; rings = []; flash = null;
   t0 = ac.currentTime + LEAD_IN; sched = -LEAD_IN;
   stopStems();
@@ -295,10 +295,12 @@ function burst(x, y, color, n, power, spread = 0) {
 const popup = (text, x, y, color, size, life = .7) => pops.push({ text, x, y, color, size, life, born: rt });
 
 // ---------- gameplay ----------
+// Switching is always the player's call: A/D goes to the nearest playable track that way (no wrap-around), or nowhere.
+const playable = (tr, t) => tr.notes.length && !locked(tr, t);
+function next(dir, t) { for (let j = cur + dir; j >= 0 && j < tracks.length; j += dir) if (playable(tracks[j], t)) return j; return -1; }
 function move(dir) {
-  const t = now();
-  for (let i = 1; i < 4; i++) { const j = (cur + dir * i + 4) % 4;
-    if (!locked(tracks[j], t) && tracks[j].notes.length) { if (j !== cur) hiss(ac.currentTime, .12, .06, 3000); tracks[cur].live = false; cur = j; return; } }
+  const j = next(dir, now()); if (j < 0) return;
+  hiss(ac.currentTime, .12, .06, 3000); tracks[cur].live = false; cur = j;
 }
 
 function tryHit(lane) {
@@ -319,8 +321,7 @@ function tryHit(lane) {
     score += 100 * mult; mult = Math.min(8, mult + 1);
     burst(cx, HIT_Y, tr.color, 70, 1.8, TW); rings.push({ x: cx, born: rt, color: tr.color });
     shake = 12; flash = { color: tr.color, born: rt };
-    captureSfx(n.bar);
-    move(1);
+    captureSfx(n.bar); // stay put: the arrows show where you can go next
   }
 }
 
@@ -518,6 +519,11 @@ function draw(t, playing) {
     text(capd ? `${tr.name}  AUTO` : tr.notes.length ? tr.name : `${tr.name} · SILENT`, x + 85, y + 17, `800 12px ${SANS}`, me ? '#fff' : tr.notes.length ? tr.color : 'rgba(255,255,255,.3)');
   });
 
+  if (!playable(tracks[cur], t) && mode === 'play') { // this track is on autopilot: point at the tracks you can move to
+    const a = .55 + .45 * pulse, l = next(-1, t), r = next(1, t);
+    if (l >= 0) text(`◀ A  ${tracks[l].name}`, 24, 430, `900 20px ${SANS}`, tracks[l].color, 'left', 16 * a);
+    if (r >= 0) text(`${tracks[r].name}  D ▶`, W - 24, 430, `900 20px ${SANS}`, tracks[r].color, 'right', 16 * a);
+  }
   if (t < 0) { const f = -t % 1; text(String(Math.ceil(-t)), W / 2, 330, `italic 900 ${90 + f * 60}px ${SANS}`, `rgba(255,255,255,${f})`, 'center', 30); }
   else if (t < .6) text('GO!', W / 2, 330, `italic 900 ${110 + t * 80}px ${SANS}`, `rgba(255,255,255,${1 - t / .6})`, 'center', 30);
   if (mode === 'over') drawResults();
