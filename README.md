@@ -67,6 +67,7 @@ Do not commit songs you don't own the rights to; `.gitignore` keeps everything b
 node analyze.test.mjs   # charting against synthetic stems with a known grid
 node render.test.mjs    # gameplay and renderer checks
 node performance.test.mjs # repeated-play resource checks and chart-work measurements
+node materials.test.mjs # bounded texture cache and scenery draw cost
 ```
 
 ## Sharing Audius tracks
@@ -80,3 +81,5 @@ Links use the current game's address, so share from a publicly reachable deploym
 ## License
 
 MIT, see [LICENSE](LICENSE). `vendor/demucs-web/` is MIT-licensed third-party code.
+
+Theme materials are generated once at 400×300 and cached: neon scanlines/reflections, liquid caustics, paper grain/folds, and etched circuits/glass facets. They are drawn behind gameplay and clipped away from the centre of the highway. No external texture downloads are needed.

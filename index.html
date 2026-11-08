@@ -33,6 +33,7 @@ function applyTheme(e) {
   const key = themeSettings.songs[songKey(e || DEMO)] || themeSettings.default;
   theme = Object.hasOwn(THEMES, key) ? THEMES[key] : THEMES.neon;
   tracks?.forEach((tr, i) => tr.color = theme.colors[i]);
+  materialTexture(); // warm on selection, before gameplay begins
 }
 function chooseTheme(useAsDefault = false) {
   const e = catalog[sel]; if (!e || e.add || e.find) return;
@@ -711,6 +712,70 @@ function text(s, x, y, font, color, align = 'center', glow = 0) {
   g.fillText(s, x, y); g.shadowBlur = 0;
 }
 
+// One small, deterministic material per theme; never generate grain in the frame loop.
+const materialCache = new Map();
+function materialTexture(style = theme) {
+  if (materialCache.has(style)) return materialCache.get(style);
+  if (!document.createElement) return null;
+  const canvas = document.createElement('canvas'); canvas.width = 400; canvas.height = 300;
+  const c = canvas.getContext('2d'); if (!c) return null;
+  let seed = 73;
+  const random = () => ((seed = Math.imul(seed, 1664525) + 1013904223 >>> 0) / 4294967296);
+  if (style === THEMES.paper) {
+    for (let i = 0; i < 6500; i++) {
+      c.fillStyle = i % 3 ? '#e5cfaa' : '#172331'; c.globalAlpha = .08 + random() * .18;
+      c.fillRect(random() * 400, random() * 300, 1 + random() * 2, .5);
+    }
+    for (let i = 0; i < 9; i++) {
+      const x = i * 57 - 30;
+      c.globalAlpha = .12; c.fillStyle = '#dfc9a4'; c.beginPath(); c.moveTo(x, 0); c.lineTo(x + 75, 300); c.lineTo(x + 95, 300); c.closePath(); c.fill();
+      c.globalAlpha = .3; c.strokeStyle = '#101521'; c.beginPath(); c.moveTo(x, 0); c.lineTo(x + 75, 300); c.stroke();
+    }
+  } else if (style === THEMES.liquid) {
+    c.strokeStyle = '#a8ffe9'; c.lineWidth = 1;
+    for (let row = 0; row < 11; row++) for (let ribbon = 0; ribbon < 2; ribbon++) {
+      c.globalAlpha = ribbon ? .09 : .25; c.beginPath();
+      for (let x = -10; x <= 410; x += 5) {
+        const y = row * 31 + Math.sin(x / 32 + row * 1.7) * 11 + Math.cos(x / 61 - row) * 15 + ribbon * 3;
+        if (x === -10) c.moveTo(x, y); else c.lineTo(x, y);
+      }
+      c.stroke();
+    }
+  } else if (style === THEMES.circuit) {
+    for (let i = 0; i < 32; i++) {
+      const x = random() * 400, y = random() * 300, length = 12 + random() * 60;
+      c.strokeStyle = style.colors[i % 4]; c.fillStyle = c.strokeStyle; c.globalAlpha = .22; c.lineWidth = .6;
+      c.beginPath(); c.moveTo(x, y); c.lineTo(x + length, y); c.lineTo(x + length + 12, y + 12); c.lineTo(x + length + 12, y + 36); c.stroke();
+      c.fillRect(x - 1, y - 1, 2, 2);
+    }
+    for (let i = 0; i < 16; i++) {
+      const x = i % 8 * 56, y = Math.floor(i / 8) * 180;
+      c.globalAlpha = .09; c.fillStyle = style.colors[i % 4]; c.beginPath(); c.moveTo(x, y); c.lineTo(x + 48, y + 60); c.lineTo(x + 20, y + 155); c.closePath(); c.fill();
+    }
+  } else {
+    c.fillStyle = '#a2cfff'; c.globalAlpha = .12;
+    for (let y = 0; y < 300; y += 3) c.fillRect(0, y, 400, .5);
+    for (let i = 0; i < 18; i++) {
+      const x = i * 25 - 15;
+      const reflection = c.createLinearGradient(x, 80, x, 300);
+      reflection.addColorStop(0, 'transparent'); reflection.addColorStop(.6, style.colors[i % 4]); reflection.addColorStop(1, 'transparent');
+      c.fillStyle = reflection; c.globalAlpha = .15; c.fillRect(x, 80, 2 + i % 3, 220);
+    }
+  }
+  materialCache.set(style, canvas); return canvas;
+}
+function clipScenery(vx, vy) {
+  // Reserve the centre for the highway: texture and effects belong to the sky and verges.
+  g.beginPath(); g.rect(-200, -200, W + 400, vy + 200);
+  g.moveTo(-200, vy); g.lineTo(vx - 35, vy); g.lineTo(vx - 430, H + 200); g.lineTo(-200, H + 200); g.closePath();
+  g.moveTo(vx + 35, vy); g.lineTo(W + 200, vy); g.lineTo(W + 200, H + 200); g.lineTo(vx + 430, H + 200); g.closePath(); g.clip();
+}
+function drawMaterial(vx, vy) {
+  const surface = materialTexture(); if (!surface) return;
+  g.save(); clipScenery(vx, vy); g.globalCompositeOperation = 'source-over'; g.globalAlpha = isPaper() ? .75 : .65;
+  g.drawImage(surface, -100, -100, W + 200, H + 200); g.restore();
+}
+
 // Capture strength follows the existing lock lifetime; scenery never outlives its instrument.
 function captureLight(tr, t) {
   if (!tr.notes.length || !locked(tr, t)) return 0;
@@ -937,6 +1002,7 @@ function draw(t, playing) {
   g.fillStyle = `hsla(${hue},90%,72%,${.45 + pulse * .55})`; g.fillRect(-200, vy - 1, W + 400, 2);
 
   drawWorld(t, playing, vx, vy);
+  drawMaterial(vx, vy);
 
   const ph = Math.floor(b / 2);
   tracks.forEach((tr, i) => {
