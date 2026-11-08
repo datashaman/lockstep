@@ -50,6 +50,7 @@ vm.runInContext(`
   noteReads = 0;
   for (let i = 0; i < 60; i++) { ac.currentTime = 300 + i / 60; logic(now()); draw(now(), true); }
   console.log('note-time reads for 60 frames of a 10-minute song:', noteReads);
+  assert.ok(noteReads < 30000, 'frame work follows nearby notes, not the full chart');
 
 `, context);
 
@@ -108,3 +109,24 @@ vm.runInContext(`
   assert.deepEqual(Array.from(channel), [-32768, 0, 16384, 32767].map(n => Math.fround(n / 32767)));
 `, context);
 console.log('ok: PCM conversion writes directly into the playback channel');
+
+vm.runInContext(`
+  const sortedNotes = [0, 0, .1, 1, 2, 10].map(t => ({ t }));
+  for (const t of [-Infinity, -1, 0, .05, .1, .2, 1, 11, Infinity]) {
+    const expected = sortedNotes.findIndex(n => n.t >= t);
+    assert.equal(noteIndex(sortedNotes, t), expected < 0 ? sortedNotes.length : expected);
+  }
+  for (const downbeat of [0, 2]) {
+    song = demoSong(); song.downbeat = downbeat; setGrid(song); tracks = buildTracks();
+    for (const tr of tracks) for (let p = 0; p < BARS / 2; p++) {
+      assert.deepEqual(phraseNotes(tr, p), tr.notes.filter(n => Math.floor(n.bar / 2) === p), 'bounded phrase matches full scan, including intro notes');
+    }
+  }
+  song = demoSong(); song.synth = false; reset(); t0 = 0;
+  tracks.forEach(tr => { tr.capFrom = 0; tr.capTo = 999; });
+  ac.currentTime = 30; logic(30);
+  const judgedCounts = tracks.map(tr => tr.judged);
+  logic(30); assert.deepEqual(tracks.map(tr => tr.judged), judgedCounts, 'no repeated judgement');
+  reset(); assert.ok(tracks.every(tr => tr.judged === 0), 'retry resets judgement cursors');
+`, context);
+console.log('ok: binary window bounds, duplicate note times, intro/phrase equivalence and cursor reset');
