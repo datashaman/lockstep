@@ -88,7 +88,11 @@ Theme materials are generated once at 400×300 and cached: neon scanlines/reflec
 
 Captures trigger brief theme-specific scenery effects: neon sweeps, water ripples, ink blooms and travelling circuit pulses. Liquid caustics drift slowly; reduced-motion mode freezes that drift and suppresses capture animations. Effects reuse capture timestamps and expire after 1.6 seconds without particle queues.
 
-Liquid Dream additionally uses a single WebGL background pass for flowing colour, caustic light and capture-driven refraction. It renders at 320×240, at most 30 times per second, into a reusable Canvas surface; gameplay and text stay in the original crisp renderer. Other themes do not run it. Reduced motion renders one still shader frame. If WebGL is unavailable, compilation fails or the context is lost, the cached liquid texture remains available; a restored context rebuilds its GPU resources.
+Liquid Dream additionally uses a single WebGL background pass for flowing colour, caustic light and capture-driven refraction. It renders at 320×240, at most 30 times per second, into a reusable Canvas surface; gameplay and text stay in the original crisp renderer. Neon shares the same renderer for soft light beams, blurred reflections, CRT scanlines and capture sweeps. Switching between supported themes replaces the active program; only one WebGL context and two small surfaces are retained. Reduced motion renders one still shader frame. If WebGL is unavailable, compilation fails or the context is lost, the cached liquid texture remains available; a restored context rebuilds its GPU resources.
+
+Paper City uses the shared shader for stationary paper fibres, directional fold lighting, contact shadows and capture-driven ink blooms. Its light moves gently; reduced motion keeps it fixed.
+
+Circuit Cathedral adds stained-glass facets, dark leading, travelling etched-circuit light and coloured capture shafts through the same bounded renderer. All four themes now have shaders and retain their individual Canvas fallback materials.
 
 ## Tablet touch controls
 

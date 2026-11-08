@@ -75,7 +75,7 @@ function applyTheme(e) {
   theme = Object.hasOwn(THEMES, key) ? THEMES[key] : THEMES.neon;
   tracks?.forEach((tr, i) => tr.color = theme.colors[i]);
   materialTexture(); // warm on selection, before gameplay begins
-  if (isLiquid()) prepareLiquidShader();
+  prepareThemeShader();
 }
 function chooseTheme(useAsDefault = false) {
   const e = catalog[sel]; if (!e || e.add || e.find) return;
@@ -878,23 +878,24 @@ function clipScenery(vx, vy) {
   g.moveTo(-200, vy); g.lineTo(vx - 35, vy); g.lineTo(vx - 430, H + 200); g.lineTo(-200, H + 200); g.closePath();
   g.moveTo(vx + 35, vy); g.lineTo(W + 200, vy); g.lineTo(W + 200, H + 200); g.lineTo(vx + 430, H + 200); g.closePath(); g.clip();
 }
-let liquidShader = null, liquidShaderRequested = false;
-const liquidCaptures = new Float32Array(4);
-function prepareLiquidShader() {
-  if (liquidShaderRequested || !globalThis.WebGLRenderingContext) return;
-  liquidShaderRequested = true;
-  import('./liquid-shader.js').then(m => { liquidShader = m.createLiquidShader(); }).catch(() => {});
+let themeShader = null, themeShaderRequested = false;
+const shaderCaptures = new Float32Array(4);
+function prepareThemeShader() {
+  if (themeShader) themeShader.select(Object.keys(THEMES).find(k => THEMES[k] === theme));
+  if (themeShaderRequested || !globalThis.WebGLRenderingContext) return;
+  themeShaderRequested = true;
+  import('./theme-shaders.js').then(m => { themeShader = m.createThemeShader(); themeShader?.select(Object.keys(THEMES).find(k => THEMES[k] === theme)); }).catch(() => {});
 }
 function drawMaterial(vx, vy, t = 0, playing = false) {
   let surface = null;
-  if (isLiquid() && liquidShader) {
+  if (themeShader) {
     let energy = 0;
     tracks.forEach((tr, i) => {
       const active = playing && tr.notes.length && locked(tr, t);
-      liquidCaptures[i] = active ? rt - tr.capAt : -1;
+      shaderCaptures[i] = active ? rt - tr.capAt : -1;
       if (active) energy += captureLight(tr, t) / 4;
     });
-    surface = liquidShader.render(rt, liquidCaptures, energy, !!reducedMotion?.matches);
+    surface = themeShader.render(Object.keys(THEMES).find(k => THEMES[k] === theme), rt, shaderCaptures, energy, !!reducedMotion?.matches);
   }
   const shaded = !!surface;
   surface ||= materialTexture(); if (!surface) return;
