@@ -88,3 +88,41 @@ vm.runInContext('drawCraft()', context);
 assert.equal(calls.filter(([name]) => name === 'stroke').length, 1, 'reduced motion omits dash trail');
 vm.runInContext('reset(); assert.equal(dash, null); assert.ok(laneHit.every(t => t === -9))', context);
 console.log('ok: craft dash, rapid reversal, blocked switch, independent thrusters, clearance, reduced motion, restart');
+
+vm.runInContext(`
+  const sleeve = { duration: 10, tracks: [
+    { name: 'DRUMS', notes: [[0, 0], [5, 2], [10, 1]] },
+    { name: 'BASS', notes: [] },
+  ] };
+  const bands = sleeveBands(sleeve);
+  assert.equal(bands[0].length, 48);
+  assert.ok(bands[0][0] > 0 && bands[0][24] > 0 && bands[0][47] > 0);
+  assert.ok(bands[1].every(n => n === 0));
+  assert.equal(sleeveBands(sleeve), bands);
+  assert.ok(bands.flat().every(n => n >= 0 && n <= 1));
+  const original = sleeveBands(demoSleeve); setLevel(0);
+  assert.equal(sleeveBands(demoSleeve), original); setLevel(1);
+  mode = 'title'; catalog = [DEMO, ADD, FIND]; pvFor = DEMO;
+  for (sel = 0; sel < catalog.length; sel++) { zones = []; drawCard(); assert.ok(zones.length > 0); }
+  sel = 0; zones = []; drawCard();
+  assert.equal(zones.length, 4, 'three difficulty controls and play');
+  for (const z of zones) {
+    assert.ok(z.x >= CARD.x && z.y >= CARD.y && z.x + z.w <= CARD.x + CARD.w && z.y + z.h <= CARD.y + CARD.h);
+  }
+  zones[0].fn(); assert.equal(level, 0); setLevel(1);
+  catalog = [{ title: 'A very long title that should fit in the selected song card — Artist', meta: sleeve, lib: 'test' }];
+  sel = 0; pvFor = null; mode = 'loading'; zones = []; drawCard();
+  catalog = [{ title: 'Unloaded song', slug: 'pending' }]; drawCard();
+`, context);
+motion.matches = true;
+calls = [];
+vm.runInContext('pulse = 0; drawSleeve(demoSleeve, 450, 142, 296, 140, true)', context);
+const quietSleeve = calls;
+calls = [];
+vm.runInContext('pulse = 1; drawSleeve(demoSleeve, 450, 142, 296, 140, true)', context);
+assert.deepEqual(calls, quietSleeve, 'reduced motion keeps the sleeve still');
+motion.matches = false;
+calls = [];
+vm.runInContext('drawSleeve(demoSleeve, 450, 142, 296, 140, false)', context);
+assert.deepEqual(calls, quietSleeve, 'stopped preview keeps the sleeve still');
+console.log('ok: sleeve bins, empty stems, caching, difficulty stability, menu controls, loading and reduced motion');

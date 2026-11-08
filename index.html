@@ -773,6 +773,47 @@ function drawList() {
   });
 }
 
+// Artwork uses the full chart, so changing difficulty never changes a song's sleeve.
+const sleeveCache = new WeakMap(), demoSleeve = demoSong();
+function sleeveBands(source) {
+  if (!source) return [];
+  if (!sleeveCache.has(source)) sleeveCache.set(source, source.tracks.map(tr => {
+    const bins = new Array(48).fill(0);
+    for (const [t, lane] of tr.notes) {
+      const i = Math.max(0, Math.min(47, Math.floor(t / Math.max(1, source.duration) * 48)));
+      bins[i] += 1 + lane * .25;
+    }
+    const peak = Math.max(1, ...bins);
+    return bins.map(n => n / peak);
+  }));
+  return sleeveCache.get(source);
+}
+function drawSleeve(source, x, y, w, h, active) {
+  const bands = sleeveBands(source), beat = active && !reducedMotion?.matches ? pulse : 0;
+  g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip();
+  g.fillStyle = '#090f19'; g.fillRect(x, y, w, h);
+  const cx = x + w * .64, cy = y + h * .51;
+  g.strokeStyle = '#243345'; g.lineWidth = 1;
+  for (let k = 0; k < 7; k++) {
+    g.beginPath(); g.moveTo(x, y + k * 26); g.lineTo(x + w, y + k * 26 - 65); g.stroke();
+  }
+  bands.forEach((bins, i) => {
+    g.strokeStyle = COLORS[i]; g.lineWidth = 2.5;
+    bins.forEach((value, k) => {
+      const angle = k / bins.length * Math.PI * 2 - Math.PI / 2, r = 19 + i * 12;
+      const outer = r + 2 + value * (9 + beat * 2);
+      g.globalAlpha = .15 + value * .7;
+      g.beginPath(); g.moveTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+      g.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer); g.stroke();
+    });
+    g.globalAlpha = 1;
+    text(source.tracks[i].name + (bins.some(n => n > 0) ? '' : ' · SILENT'), x + 12, y + 22 + i * 17, `700 9px ${MONO}`, COLORS[i], 'left');
+  });
+  g.globalAlpha = 1; g.fillStyle = '#e5faff'; g.beginPath(); g.arc(cx, cy, 3 + beat, 0, Math.PI * 2); g.fill();
+  text(source ? 'FOUR TRACKS / ONE GROOVE' : 'LOADING THE GROOVE', x + 12, y + h - 10, `600 8px ${MONO}`, '#8e9bab', 'left');
+  g.restore();
+}
+
 const CARD = { x: 428, y: 128, w: 340, h: 400 };
 function drawCard() {
   const { x, y, w, h } = CARD, e = catalog[sel], L = x + 22, R = x + w - 22;
@@ -791,24 +832,21 @@ function drawCard() {
     return cta(e.add ? 'ENTER ▸ PICK FILES' : 'ENTER ▸ SEARCH', start);
   }
   const a = about(e), ready = pvFor === e && mode !== 'loading';
-  text(fit(a.name, R - L, `900 24px ${SANS}`), L, y + 44, `900 24px ${SANS}`, '#fff', 'left');
-  if (a.artist) text(fit(a.artist, R - L, `600 14px ${SANS}`), L, y + 66, `600 14px ${SANS}`, `hsl(${hue},90%,78%)`, 'left');
-  text(fit(a.src, R - L, `500 10px ${MONO}`), L, y + 86, `500 10px ${MONO}`, 'rgba(255,255,255,.4)', 'left');
-  [['BPM', ready ? String(Math.round(song.bpm || BPM)) : '…'], ['LENGTH', a.dur ? mmss(a.dur) : ready ? mmss(song.duration) : '…'],
-   ['NOTES', ready ? String(tracks.reduce((n, tr) => n + tr.notes.length, 0)) : '…']].forEach(([k, v], i) => {
-    text(k, L + i * 98, y + 114, `700 9px ${MONO}`, 'rgba(255,255,255,.4)', 'left'); text(v, L + i * 98, y + 138, `700 20px ${MONO}`, '#fff', 'left'); });
-  if (ready) tracks.forEach((tr, i) => { const pw = (R - L) / 2 - 4, px = L + (i % 2) * (pw + 8), py = y + 156 + Math.floor(i / 2) * 32, has = tr.notes.length;
-    box(px, py, pw, 26, 6, 'rgba(255,255,255,.06)');
-    text(tr.name, px + 10, py + 17, `800 11px ${SANS}`, has ? tr.color : 'rgba(255,255,255,.3)', 'left');
-    text(has ? '●' : 'silent', px + pw - 10, py + 17, `700 10px ${MONO}`, has ? tr.color : 'rgba(255,255,255,.3)', 'right'); });
-  else text(mode === 'loading' ? 'loading stems…' : 'loading…', L, y + 174, `600 12px ${MONO}`, 'rgba(255,255,255,.4)', 'left');
-  const dy = y + 232, sw = (R - L) / 3;
+  const source = e === DEMO ? demoSleeve : e.song || e.meta || (ready ? song : null);
+  drawSleeve(source, L, y + 14, R - L, 140, ready && ac?.state === 'running');
+  text(fit(a.name, R - L, `900 30px ${SANS}`), L, y + 190, `900 30px ${SANS}`, '#fff', 'left');
+  text(fit(a.artist || 'FOUR-TRACK SESSION', R - L, `600 12px ${SANS}`), L, y + 211, `600 12px ${SANS}`, '#a6b6c8', 'left');
+  const bpm = source?.bpm || (e === DEMO ? BPM : null), duration = a.dur || source?.duration;
+  const count = ready ? tracks.reduce((n, tr) => n + tr.notes.length, 0) : null;
+  text(`${bpm ? Math.round(bpm) : '—'} BPM   /   ${duration ? mmss(duration) : '—'}   /   ${count ?? '—'} NOTES`, L, y + 236, `600 10px ${MONO}`, '#a6b6c8', 'left');
+  const dy = y + 252, sw = (R - L) / 3;
   box(L, dy, R - L, 30, 8, null, 'rgba(255,255,255,.22)');
   LEVELS.forEach((lv, i) => { const on = i === level; if (on) box(L + i * sw + 2, dy + 2, sw - 4, 26, 6, '#fff');
     text(lv.name, L + i * sw + sw / 2, dy + 20, `800 11px ${MONO}`, on ? '#12081f' : 'rgba(255,255,255,.5)'); zone(L + i * sw, dy, sw, 30, () => setLevel(i)); });
   const b = best[`${songKey(e)}:${level}`];
   text(`BEST · ${LEVELS[level].name}`, L, dy + 60, `600 11px ${MONO}`, 'rgba(255,255,255,.5)', 'left');
   text(b ? `${b.grade} · ${b.score.toLocaleString()}` : 'not played yet', R, dy + 60, `700 12px ${MONO}`, b ? '#fff' : 'rgba(255,255,255,.4)', 'right');
+  text(fit(a.src, R - L, `500 9px ${MONO}`), L, y + 326, `500 9px ${MONO}`, '#8e9bab', 'left');
   cta(mode === 'loading' ? 'LOADING…' : 'ENTER ▸ PLAY', start);
 }
 
