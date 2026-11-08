@@ -200,3 +200,33 @@ vm.runInContext(`
   reset(); assert.ok(tracks.every(tr => tr.hits === 0 && tr.misses === 0 && tr.caps === 0));
 `, context);
 console.log('ok: per-instrument totals match scorekeeping, inactive notes excluded, capture drain, results states and restart');
+
+vm.runInContext(`
+  reset(); song.synth = false; rt = 50;
+  tracks[3].notes = [];
+  tracks.forEach((tr, i) => { tr.capTo = i < 2 ? 8 : -1; tr.capAt = 49; });
+  updateSync(0); assert.equal(inSync, false, 'partial capture is not full sync');
+  tracks[2].capTo = 8;
+  const syncScore = score;
+  logic(0); assert.equal(inSync, true); assert.equal(syncAt, 50, 'silent track does not block sync');
+  rt = 50.2; updateSync(0); assert.equal(syncAt, 50, 'holding full capture does not retrigger');
+  draw(0, true);
+  updateSync(BARLEN * 8); assert.equal(inSync, false, 'expiry ends full sync');
+  tracks.forEach(tr => tr.capTo = 16); rt = 51;
+  updateSync(BARLEN * 8); assert.equal(inSync, true); assert.equal(syncAt, 51, 'recapture triggers again');
+  assert.equal(score, syncScore, 'celebration adds no score');
+`, context);
+assert.ok(calls.some(([name, text]) => name === 'fillText' && text === 'IN SYNC'));
+motion.matches = true;
+calls = [];
+vm.runInContext('rt = 51.1; drawCraft(); drawWorld(0, true, 400, 190)', context);
+const staticSync = calls;
+calls = [];
+vm.runInContext('rt = 51.3; pulse = .2; drawCraft(); drawWorld(0, true, 400, 190)', context);
+assert.deepEqual(calls, staticSync, 'reduced-motion celebration has static geometry');
+vm.runInContext(`
+  tracks.forEach(tr => tr.notes = []); updateSync(0);
+  assert.equal(inSync, false, 'empty song cannot earn sync');
+  reset(); assert.equal(inSync, false); assert.equal(syncAt, -9);
+`, context);
+console.log('ok: sync entry, no repeated trigger, expiry, recapture, silent/empty tracks, unchanged score, reduced motion and restart');
