@@ -375,3 +375,23 @@ vm.runInContext(`
   reset(); assert.equal(volumeEvents.at(-1), .8); assert.equal(srcs.length, 4); assert.equal(tempo.length, 1);
 `, context);
 console.log('ok: consecutive-miss failure, clickable retry, stem start alignment, low-tempo pause/resume and volume restoration');
+
+vm.runInContext(`
+  assert.equal(titleOffset(100, 250, 50), 0, 'short titles stay still');
+  assert.equal(titleOffset(530, 250, 1), 0, 'pause at start');
+  assert.equal(titleOffset(530, 250, 6.25), 140, 'scroll forward');
+  assert.equal(titleOffset(530, 250, 11.5), 280, 'hold full ending');
+  assert.equal(titleOffset(530, 250, 17.5), 140, 'scroll back');
+  assert.equal(titleOffset(530, 250, 22.5), 0, 'return to beginning');
+  for (let age = 0; age < 50; age += .1) assert.ok(titleOffset(530, 250, age) >= 0 && titleOffset(530, 250, age) <= 280);
+  assert.equal(titleOffset(530, 250, 2.9, true), 0);
+  assert.equal(titleOffset(530, 250, 3, true), 200);
+  assert.equal(titleOffset(530, 250, 6, true), 280, 'reduced-motion pages expose the end');
+  const entryA = { title: 'A' }, entryB = { title: 'B' };
+  rt = 200; selectedTitle('A long title', 0, 40, 50, '700 15px sans-serif', '#fff', entryA);
+  rt = 205; selectedTitle('A long title', 0, 40, 50, '700 15px sans-serif', '#fff', entryA);
+  assert.equal(titleStarted, 200, 'list and panel share selection start');
+  selectedTitle('Another title', 0, 40, 50, '700 15px sans-serif', '#fff', entryB);
+  assert.equal(titleStarted, 205, 'selection change restarts title');
+`, context);
+console.log('ok: selected-title scrolling, endpoint holds, looping, short titles, reduced-motion pages and selection reset');
