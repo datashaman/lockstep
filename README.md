@@ -68,6 +68,7 @@ node analyze.test.mjs   # charting against synthetic stems with a known grid
 node render.test.mjs    # gameplay and renderer checks
 node performance.test.mjs # repeated-play resource checks and chart-work measurements
 node materials.test.mjs # bounded texture cache and scenery draw cost
+node liquid-shader.test.mjs # shader lifecycle, frame cap and fallbacks
 ```
 
 ## Sharing Audius tracks
@@ -85,3 +86,5 @@ MIT, see [LICENSE](LICENSE). `vendor/demucs-web/` is MIT-licensed third-party co
 Theme materials are generated once at 400×300 and cached: neon scanlines/reflections, liquid caustics, paper grain/folds, and etched circuits/glass facets. They are drawn behind gameplay and clipped away from the centre of the highway. No external texture downloads are needed.
 
 Captures trigger brief theme-specific scenery effects: neon sweeps, water ripples, ink blooms and travelling circuit pulses. Liquid caustics drift slowly; reduced-motion mode freezes that drift and suppresses capture animations. Effects reuse capture timestamps and expire after 1.6 seconds without particle queues.
+
+Liquid Dream additionally uses a single WebGL background pass for flowing colour, caustic light and capture-driven refraction. It renders at 320×240, at most 30 times per second, into a reusable Canvas surface; gameplay and text stay in the original crisp renderer. Other themes do not run it. Reduced motion renders one still shader frame. If WebGL is unavailable, compilation fails or the context is lost, the cached liquid texture remains available; a restored context rebuilds its GPU resources.
