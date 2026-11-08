@@ -307,7 +307,7 @@ vm.runInContext(`
     assert.ok(Math.abs(audioTime(songTime(elapsed)) - elapsed) < 1e-8, 'transport remains invertible through repeated changes');
   }
   const priorBest = JSON.stringify(best);
-  voice({ stop: () => stopped.push('synth') }); changeGroove(-100);
+  voice({ stop: () => stopped.push('synth'), disconnect() {} }); changeGroove(-100);
   assert.equal(mode, 'failed'); assert.equal(srcs.length, 0); assert.equal(voices.size, 0);
   assert.equal(stopped.length, 5); assert.equal(JSON.stringify(best), priorBest, 'failed run does not save a best');
   const frozen = now(); ac.currentTime += 20; assert.equal(now(), frozen); drawFailure();
@@ -357,8 +357,8 @@ vm.runInContext(`
   const gainParam = { value: 0, cancelScheduledValues() {}, setValueAtTime: v => volumeEvents.push(v), setTargetAtTime: v => volumeEvents.push(v) };
   out = { gain: gainParam };
   ac = { currentTime: 10, state: 'running',
-    createBufferSource: () => ({ playbackRate: { setValueAtTime() {} }, connect: target => target, start: at => sourceStarts.push(at), stop() {} }),
-    createGain: () => ({ gain: gainParam, connect() {} }),
+    createBufferSource: () => ({ playbackRate: { setValueAtTime() {} }, disconnect() {}, connect: target => target, start: at => sourceStarts.push(at), stop() {} }),
+    createGain: () => ({ gain: gainParam, connect() {}, disconnect() {} }),
     suspend: async () => { ac.state = 'suspended'; }, resume: async () => { ac.state = 'running'; }
   };
   song.buffers = [{}, {}, {}, {}]; reset(); assert.deepEqual(sourceStarts, [13, 13, 13, 13]);
