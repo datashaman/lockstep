@@ -9,7 +9,7 @@ const record = (name, args) => {
   calls.push([name, ...args]);
 };
 const canvas = {};
-for (const name of ['setTransform', 'translate', 'rotate', 'save', 'restore', 'beginPath', 'closePath', 'moveTo', 'lineTo', 'arc', 'ellipse', 'fill', 'stroke', 'fillRect', 'strokeRect', 'roundRect', 'fillText', 'clip', 'rect']) {
+for (const name of ['setTransform', 'translate', 'rotate', 'save', 'restore', 'beginPath', 'closePath', 'moveTo', 'lineTo', 'arc', 'ellipse', 'fill', 'stroke', 'fillRect', 'strokeRect', 'roundRect', 'quadraticCurveTo', 'fillText', 'clip', 'rect']) {
   canvas[name] = (...args) => record(name, args);
 }
 for (const name of ['createLinearGradient', 'createRadialGradient']) canvas[name] = (...args) => {
@@ -106,11 +106,11 @@ vm.runInContext(`
   mode = 'title'; catalog = [DEMO, ADD, FIND]; pvFor = DEMO;
   for (sel = 0; sel < catalog.length; sel++) { zones = []; drawCard(); assert.ok(zones.length > 0); }
   sel = 0; zones = []; drawCard();
-  assert.equal(zones.length, 4, 'three difficulty controls and play');
+  assert.equal(zones.length, 6, 'theme, default, three difficulty controls and play');
   for (const z of zones) {
-    assert.ok(z.x >= CARD.x && z.y >= CARD.y && z.x + z.w <= CARD.x + CARD.w && z.y + z.h <= CARD.y + CARD.h);
+    assert.ok(z.x >= CARD.x && z.y >= CARD.y && z.x + z.w <= CARD.x + CARD.w && z.y + z.h <= CARD.y + CARD.h + 28);
   }
-  zones[0].fn(); assert.equal(level, 0); setLevel(1);
+  zones[2].fn(); assert.equal(level, 0); setLevel(1);
   catalog = [{ title: 'A very long title that should fit in the selected song card — Artist', meta: sleeve, lib: 'test' }];
   sel = 0; pvFor = null; mode = 'loading'; zones = []; drawCard();
   catalog = [{ title: 'Unloaded song', slug: 'pending' }]; drawCard();
@@ -395,3 +395,37 @@ vm.runInContext(`
   assert.equal(titleStarted, 205, 'selection change restarts title');
 `, context);
 console.log('ok: selected-title scrolling, endpoint holds, looping, short titles, reduced-motion pages and selection reset');
+
+context.localStorage = {};
+vm.runInContext(`
+  song = demoSong(); setGrid(song); tracks = buildTracks();
+  catalog = [DEMO, { title: 'Another song', slug: 'another' }]; sel = 0; mode = 'title';
+  themeSettings = { default: 'neon', songs: {} }; applyTheme(DEMO);
+  const notePositions = tracks.map(tr => tr.notes.map(n => [n.t, n.lane]));
+  const beforeThemeScore = score, beforeThemeTime = t0, projected = P(20, 1);
+  chooseTheme(); assert.equal(theme.name, 'Liquid Dream');
+  assert.equal(JSON.parse(localStorage.lockstepThemes).songs.demo, 'liquid');
+  assert.deepEqual(tracks.map(tr => tr.notes.map(n => [n.t, n.lane])), notePositions);
+  assert.deepEqual(P(20, 1), projected); assert.equal(score, beforeThemeScore); assert.equal(t0, beforeThemeTime);
+  assert.equal(tracks[0].color, THEMES.liquid.colors[0]);
+  chooseTheme(true); sel = 1; applyTheme(catalog[sel]); assert.equal(theme.name, 'Liquid Dream');
+  chooseTheme(); assert.equal(theme.name, 'Neon');
+  sel = 0; applyTheme(DEMO); assert.equal(theme.name, 'Liquid Dream', 'per-song choice survives default/other-song changes');
+  mode = 'play'; rt = 300; flash = null; dash = null; inSync = false;
+  tracks.forEach((tr, i) => { tr.capAt = 299; tr.capTo = i < 2 ? 8 : -1; });
+  draw(2, true); drawCraft(); drawSleeve(song, 48, 136, 310, 190, false); drawResults();
+`, context);
+assert.ok(calls.some(([name]) => name === 'quadraticCurveTo'), 'liquid craft has curved geometry');
+motion.matches = true;
+calls = [];
+vm.runInContext('drawLiquidWorld(2, false, 400, 190)', context);
+const stillWater = calls;
+calls = [];
+vm.runInContext('drawLiquidWorld(4, false, 400, 190)', context);
+assert.deepEqual(calls, stillWater, 'reduced-motion water is static');
+for (const stored of ['{invalid', 'null', JSON.stringify({ default: 'unknown', songs: { demo: 'unknown' } }), JSON.stringify({ default: 'neon', songs: { demo: 'liquid' } })]) {
+  const fresh = vm.createContext({ ...context, localStorage: { lockstepThemes: stored } });
+  vm.runInContext(source, fresh);
+  assert.equal(vm.runInContext('theme.name', fresh), stored.includes('liquid') ? 'Liquid Dream' : 'Neon');
+}
+console.log('ok: per-song/default theme persistence, invalid storage fallback, unchanged gameplay geometry, liquid rendering and reduced motion');

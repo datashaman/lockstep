@@ -12,6 +12,30 @@ const LEVELS = [{ name: 'EASY', win: .12 }, { name: 'NORMAL', win: .1 }, { name:
 const CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]]; // Am F C G
 const HUES = [275, 215, 185, 325];                                        // sky tint per chord
 const COLORS = ['#ff4d6d', '#ffb703', '#3ddc97', '#4cc9f0'];
+const THEMES = {
+  neon: { name: 'Neon', colors: COLORS, hues: HUES },
+  liquid: { name: 'Liquid Dream', colors: ['#ffb3c6', '#f7d794', '#8ce8cf', '#a7c7ff'], hues: [195, 205, 182, 215] },
+};
+let themeSettings = { default: 'neon', songs: {} }, theme = THEMES.neon;
+try {
+  const saved = JSON.parse(globalThis.localStorage?.lockstepThemes || '{}');
+  if (saved?.default === 'liquid') themeSettings.default = 'liquid';
+  if (saved?.songs && typeof saved.songs === 'object') themeSettings.songs = Object.fromEntries(Object.entries(saved.songs).filter(([, v]) => v === 'neon' || v === 'liquid'));
+} catch {}
+const isLiquid = () => theme === THEMES.liquid;
+function applyTheme(e) {
+  const key = themeSettings.songs[songKey(e || DEMO)] || themeSettings.default;
+  theme = key === 'liquid' ? THEMES.liquid : THEMES.neon;
+  tracks?.forEach((tr, i) => tr.color = theme.colors[i]);
+}
+function chooseTheme(useAsDefault = false) {
+  const e = catalog[sel]; if (!e || e.add || e.find) return;
+  if (useAsDefault) themeSettings.default = isLiquid() ? 'liquid' : 'neon';
+  else themeSettings.songs[songKey(e)] = isLiquid() ? 'neon' : 'liquid';
+  applyTheme(e);
+  try { localStorage.lockstepThemes = JSON.stringify(themeSettings); } catch {}
+}
+
 const W = 800, H = 600, HZ = 190, HIT_Y = 500, F = 0.8, LOOK = 4, TW = 168, GAP = 26, LW = TW / 3;
 const SANS = 'system-ui, sans-serif', MONO = 'ui-monospace, Menlo, monospace';
 const cv = document.getElementById('c'), g = cv.getContext('2d'), DPR = Math.min(2, globalThis.devicePixelRatio || 1);
@@ -134,7 +158,7 @@ function thin(notes, lv) {
   }
   return out;
 }
-const buildTracks = () => song.tracks.map((tr, i) => ({ name: tr.name, kind: tr.kind, color: COLORS[i], capFrom: -1, capTo: -1, capAt: -9, live: false, hits: 0, misses: 0, caps: 0, timing: 0, judged: 0,
+const buildTracks = () => song.tracks.map((tr, i) => ({ name: tr.name, kind: tr.kind, color: theme.colors[i], capFrom: -1, capTo: -1, capAt: -9, live: false, hits: 0, misses: 0, caps: 0, timing: 0, judged: 0,
   notes: thin(tr.notes, level).map(([t, lane]) => ({ t, lane, bar: bar(t), hit: false, missed: false })) }));
 
 // Stored charts are time-sorted; bound hot loops to the interval they actually use.
@@ -235,6 +259,7 @@ async function start() {
   clearTimeout(pvTimer); pvN++; stopPreview();
   if (e.find) { mode = 'find'; au.list.length ? preview() : auSearch(); return; }
   if (!ac) initAudio();
+  applyTheme(e);
   const menuImage = document.createElement('canvas');
   menuImage.width = cv.width; menuImage.height = cv.height; menuImage.getContext('2d').drawImage(cv, 0, 0);
   mode = 'loading'; loadErr = ''; playKey = songKey(e);
@@ -249,6 +274,7 @@ const stopPreview = () => { pv.forEach(s => { s.stop(); s.disconnect(); }); pv =
 function showSelected() {
   clearTimeout(pvTimer); const e = catalog[sel], n = ++pvN;
   if (!e || e.add || e.find) return; // keep whatever is playing behind the add/find buttons
+  applyTheme(e);
   pvTimer = setTimeout(async () => {
     try {
       const s = await loadSong(e); if (n !== pvN || mode !== 'title') return;
@@ -466,6 +492,7 @@ addEventListener('keydown', e => {
     else if (k === 'arrowup' || k === 'w') pick((sel + catalog.length - 1) % catalog.length);
     else if (k === 'arrowdown' || k === 's') pick((sel + 1) % catalog.length);
     else if (k === 'enter' || k === ' ') start();
+    else if (k === 't') chooseTheme(e.shiftKey);
     else if (k === 'o') picker.click();
     else if (k === 'f') { pick(catalog.indexOf(FIND)); start(); }
     else if (k === '?' || k === '/') help = true;
@@ -582,7 +609,7 @@ function frame() {
   shake = Math.max(0, shake - fdt * 40);
   const energy = playing ? .3 + groove / 100 * .7 : 1;
   const warp = (.25 + pulse * .5 + (playing ? mult * .12 : 0)) * energy;
-  for (const s of stars) { s.z -= fdt * warp; if (s.z < .03) { s.x = Math.random() * 2 - 1; s.y = Math.random() * 2 - 1; s.z = 1; } }
+  for (const s of stars) { if (isLiquid() && reducedMotion?.matches) break; s.z -= fdt * warp; if (s.z < .03) { s.x = Math.random() * 2 - 1; s.y = Math.random() * 2 - 1; s.z = 1; } }
   for (const p of parts) { p.x += p.vx * fdt; p.y += p.vy * fdt; p.vy += 700 * fdt; p.vx *= .98; }
   parts = parts.filter(p => rt - p.born < p.life); pops = pops.filter(p => rt - p.born < p.life); rings = rings.filter(r => rt - r.born < .7);
   shown += (score - shown) * Math.min(1, fdt * 12);
@@ -612,7 +639,38 @@ function captureLight(tr, t) {
   if (!tr.notes.length || !locked(tr, t)) return 0;
   return Math.max(0, Math.min(1, (rt - tr.capAt) / .65, tr.capTo - barF(t)));
 }
+function drawLiquidWorld(t, playing, vx, vy) {
+  const motion = reducedMotion?.matches ? 0 : barF(t);
+  g.save();
+  const water = g.createLinearGradient(0, vy, 0, H);
+  water.addColorStop(0, '#123c48'); water.addColorStop(1, '#020f1b');
+  g.fillStyle = water; g.globalAlpha = .8; g.fillRect(-200, vy, W + 400, H);
+  tracks.forEach((tr, i) => {
+    const light = playing ? captureLight(tr, t) : .2;
+    g.strokeStyle = tr.color;
+    for (let ribbon = 0; ribbon < 3; ribbon++) {
+      g.globalAlpha = .04 + light * .18; g.lineWidth = 1 + light * 2;
+      g.beginPath();
+      for (let x = -100; x <= W + 100; x += 20) {
+        const y = vy - 50 + i * 31 + ribbon * 13 + Math.sin(x / (100 + i * 23) + motion * .3 + ribbon + i) * (12 + light * 10);
+        if (x === -100) g.moveTo(x, y); else g.lineTo(x, y);
+      }
+      g.stroke();
+    }
+    if (light > 0) {
+      g.globalAlpha = light * .16; g.beginPath();
+      g.ellipse(vx + (i - 1.5) * 85, vy + 35, 42 + light * 25, 9, 0, 0, Math.PI * 2); g.stroke();
+    }
+  });
+  if (playing && inSync) {
+    const glow = g.createRadialGradient(vx, vy, 0, vx, vy, 220);
+    glow.addColorStop(0, '#b9fff1'); glow.addColorStop(1, 'transparent');
+    g.globalAlpha = .25; g.fillStyle = glow; g.fillRect(vx - 220, vy - 220, 440, 440);
+  }
+  g.restore();
+}
 function drawWorld(t, playing, vx, vy) {
+  if (isLiquid()) return drawLiquidWorld(t, playing, vx, vy);
   const energy = tracks.map(tr => playing ? captureLight(tr, t) : 0);
   const motion = reducedMotion?.matches ? 0 : barF(t), beat = reducedMotion?.matches ? .3 : pulse;
   g.save();
@@ -679,10 +737,19 @@ function drawCraft() {
     }
   }
   g.globalAlpha = 1; g.fillStyle = '#243548'; g.strokeStyle = color; g.lineWidth = 1.5;
-  g.beginPath(); g.moveTo(x, y - 5); g.lineTo(x + 8, y + 4); g.lineTo(x + 32, y + 12);
+  g.beginPath();
+  if (isLiquid()) {
+    g.fillStyle = '#163c4b'; g.moveTo(x, y - 5);
+    g.quadraticCurveTo(x + 10, y + 6, x + 35, y + 2);
+    g.quadraticCurveTo(x + 28, y + 16, x + 7, y + 10);
+    g.lineTo(x, y + 16); g.lineTo(x - 7, y + 10);
+    g.quadraticCurveTo(x - 28, y + 16, x - 35, y + 2);
+    g.quadraticCurveTo(x - 10, y + 6, x, y - 5);
+  } else {
+  g.moveTo(x, y - 5); g.lineTo(x + 8, y + 4); g.lineTo(x + 32, y + 12);
   g.lineTo(x + 20, y + 14); g.lineTo(x + 8, y + 10); g.lineTo(x + 6, y + 14);
   g.lineTo(x - 6, y + 14); g.lineTo(x - 8, y + 10); g.lineTo(x - 20, y + 14);
-  g.lineTo(x - 32, y + 12); g.lineTo(x - 8, y + 4); g.closePath(); g.fill(); g.stroke();
+  g.lineTo(x - 32, y + 12); g.lineTo(x - 8, y + 4); } g.closePath(); g.fill(); g.stroke();
   if (charge) { g.globalAlpha = charge * .55; g.fillStyle = color; g.fill(); }
   // A lit fuselage and dark wing facets give the small silhouette a readable nose and tail.
   g.globalAlpha = 1; g.fillStyle = '#8397ab'; g.beginPath();
@@ -696,7 +763,7 @@ function drawCraft() {
   g.moveTo(x, y); g.lineTo(x + 3, y + 6); g.lineTo(x, y + 8); g.lineTo(x - 3, y + 6); g.closePath(); g.fill();
   if (inSync && rt - syncAt < 1.2) {
     g.globalAlpha = reducedMotion?.matches ? .7 : Math.max(0, 1 - (rt - syncAt) / 1.2);
-    COLORS.forEach((color, i) => { g.fillStyle = color; g.fillRect(x - 14 + i * 7, y + 9, 6, 3); });
+    theme.colors.forEach((color, i) => { g.fillStyle = color; g.fillRect(x - 14 + i * 7, y + 9, 6, 3); });
   }
   for (let lane = 0; lane < 3; lane++) {
     const hit = Math.max(0, 1 - (rt - laneHit[cur * 3 + lane]) / .18), ex = x + (lane - 1) * 22;
@@ -709,7 +776,7 @@ function drawCraft() {
 }
 
 function draw(t, playing) {
-  const b = bar(t), dh = ((HUES[b % 4] - hue) % 360 + 540) % 360 - 180;
+  const b = bar(t), dh = ((theme.hues[b % 4] - hue) % 360 + 540) % 360 - 180;
   hue += dh * .04;
   // slow sways locked to the bar grid (one long left-right swing per 16 bars), swooping harder as the multiplier climbs
   const u = barF(t); bendAmp += ((playing ? .45 + mult * .07 : .6) - bendAmp) * .02;
@@ -726,10 +793,13 @@ function draw(t, playing) {
   g.rotate((camX - camTo) * .0005 - bendX * .0003); g.translate(-W / 2, -H / 2); // bank into the curve
 
   g.globalCompositeOperation = 'lighter'; g.lineWidth = 1.5;
-  for (const s of stars) {
-    const k = 260, z1 = s.z, z0 = s.z + .03 + pulse * .06;
+  for (let i = 0; i < (isLiquid() ? 45 : stars.length); i++) {
+    const s = stars[i], k = 260, z1 = s.z, z0 = s.z + .03 + pulse * .06;
     g.strokeStyle = `hsla(${hue + 60},80%,80%,${Math.min(1, (1 - z1) * 1.4)})`;
-    g.beginPath(); g.moveTo(vx + s.x / z0 * k, vy + s.y / z0 * k); g.lineTo(vx + s.x / z1 * k, vy + s.y / z1 * k); g.stroke();
+    g.beginPath();
+    if (isLiquid()) g.arc(vx + s.x / z1 * k, vy + s.y / z1 * k, Math.min(4, 1 / z1), 0, Math.PI * 2);
+    else { g.moveTo(vx + s.x / z0 * k, vy + s.y / z0 * k); g.lineTo(vx + s.x / z1 * k, vy + s.y / z1 * k); }
+    g.stroke();
   }
   const core = g.createRadialGradient(vx, vy, 0, vx, vy, 150 + pulse * 50);
   core.addColorStop(0, `hsla(${hue},90%,70%,${.4 + mult * .03})`); core.addColorStop(1, 'hsla(0,0%,0%,0)');
@@ -769,7 +839,7 @@ function draw(t, playing) {
     }
     // rails, lane dividers, beat lines
     g.strokeStyle = tr.color;
-    g.globalAlpha = me ? .95 : .35; g.lineWidth = me ? 3 : 1.5; seg(x0, -.35, x0, LOOK); seg(x1, -.35, x1, LOOK);
+    g.globalAlpha = me ? (isLiquid() ? .6 : .95) : .35; g.lineWidth = isLiquid() ? (me ? 7 : 3) : me ? 3 : 1.5; seg(x0, -.35, x0, LOOK); seg(x1, -.35, x1, LOOK);
     g.globalAlpha = .14; g.lineWidth = 1; seg(x0 + LW, -.35, x0 + LW, LOOK); seg(x0 + 2 * LW, -.35, x0 + 2 * LW, LOOK);
     for (let k = Math.max(0, idx(beats, t - .35) + 1); k < beats.length && beats[k] < t + LOOK; k++) {
       const d = beats[k] - t, j = ((k - gridDown) % 8 + 8) % 8, phr = j === 0, br = j % 4 === 0;
@@ -782,6 +852,13 @@ function draw(t, playing) {
       g.fillStyle = tr.color;
       if (au && d < 0) { if (d > -.15) { g.globalAlpha = (1 + d / .15) * .7; quad(lx + 3, lx + LW - 3, -.05, .6); g.fill(); } continue; }
       const a = (au ? .22 : n.missed ? .15 : me ? 1 : .45) * fade(d);
+      if (isLiquid()) {
+        const [nx, ny] = P(lx + LW / 2, d), scale = F / (F + Math.max(d, -.35));
+        g.globalAlpha = a * .28; g.beginPath(); g.ellipse(nx, ny, 18 * scale, 7 * scale, 0, 0, Math.PI * 2); g.fill();
+        g.globalAlpha = a; g.beginPath(); g.ellipse(nx, ny, 11 * scale, 4 * scale, 0, 0, Math.PI * 2); g.fill();
+        if (!au && !n.missed) { g.fillStyle = '#effffb'; g.beginPath(); g.ellipse(nx, ny - scale, 5 * scale, 1.5 * scale, 0, 0, Math.PI * 2); g.fill(); }
+        continue;
+      }
       g.globalAlpha = a * .35; quad(lx + 3, lx + LW - 3, d - .06, d + .06); g.fill();
       g.globalAlpha = a; quad(lx + 8, lx + LW - 8, d - .03, d + .03); g.fill();
       if (!au && !n.missed) { g.globalAlpha = a * .8; g.fillStyle = '#fff'; quad(lx + 16, lx + LW - 16, d - .01, d + .01); g.fill(); }
@@ -820,7 +897,9 @@ function draw(t, playing) {
   g.globalCompositeOperation = 'lighter';
   for (const r of rings) { const a = (rt - r.born) / .7; g.globalAlpha = 1 - a; g.strokeStyle = r.color; g.lineWidth = 8 * (1 - a);
     g.beginPath(); g.ellipse(sx(r.x), HIT_Y, 30 + a * 520, (30 + a * 520) * .35, 0, 0, 7); g.stroke(); }
-  for (const p of parts) { g.globalAlpha = 1 - (rt - p.born) / p.life; g.fillStyle = p.color; g.fillRect(sx(p.x) - p.size / 2, p.y - p.size / 2, p.size, p.size); }
+  for (const p of parts) { g.globalAlpha = 1 - (rt - p.born) / p.life; g.fillStyle = p.color;
+    if (isLiquid()) { g.beginPath(); g.arc(sx(p.x), p.y, p.size / 2, 0, Math.PI * 2); g.fill(); }
+    else g.fillRect(sx(p.x) - p.size / 2, p.y - p.size / 2, p.size, p.size); }
   g.globalCompositeOperation = 'source-over';
   for (const p of pops) { const age = rt - p.born; g.globalAlpha = Math.min(1, 2 * (1 - age / p.life));
     text(p.text, sx(p.x), p.y - age * 50, `italic 900 ${p.size * (1 + Math.max(0, .12 - age) * 4)}px ${SANS}`, p.color, 'center', 12); }
@@ -995,15 +1074,22 @@ function sleeveBands(source) {
 function drawSleeve(source, x, y, w, h, active) {
   const bands = sleeveBands(source), beat = active && !reducedMotion?.matches ? pulse : 0;
   g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip();
-  g.fillStyle = '#090f19'; g.fillRect(x, y, w, h);
+  g.fillStyle = isLiquid() ? '#05232d' : '#090f19'; g.fillRect(x, y, w, h);
   const cx = x + w * .64, cy = y + h * .51;
   g.strokeStyle = '#243345'; g.lineWidth = 1;
-  for (let k = 0; k < 7; k++) {
+  for (let k = 0; k < (isLiquid() ? 0 : 7); k++) {
     g.beginPath(); g.moveTo(x, y + k * 26); g.lineTo(x + w, y + k * 26 - 65); g.stroke();
   }
   bands.forEach((bins, i) => {
-    g.strokeStyle = COLORS[i]; g.lineWidth = 2.5;
-    bins.forEach((value, k) => {
+    g.strokeStyle = theme.colors[i]; g.lineWidth = 2.5;
+    if (isLiquid()) {
+      g.globalAlpha = .8; g.beginPath();
+      bins.forEach((value, k) => {
+        const px = x + w * .38 + k / (bins.length - 1) * w * .58;
+        const py = y + 28 + i * 24 + Math.sin(k * .2 + i) * 8 - value * (14 + beat * 2);
+        if (!k) g.moveTo(px, py); else g.lineTo(px, py);
+      }); g.stroke();
+    } else bins.forEach((value, k) => {
       const angle = k / bins.length * Math.PI * 2 - Math.PI / 2, r = 19 + i * 12;
       const outer = r + 2 + value * (9 + beat * 2);
       g.globalAlpha = .15 + value * .7;
@@ -1011,7 +1097,7 @@ function drawSleeve(source, x, y, w, h, active) {
       g.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer); g.stroke();
     });
     g.globalAlpha = 1;
-    text(source.tracks[i].name + (bins.some(n => n > 0) ? '' : ' · SILENT'), x + 12, y + 22 + i * 17, `700 9px ${MONO}`, COLORS[i], 'left');
+    text(source.tracks[i].name + (bins.some(n => n > 0) ? '' : ' · SILENT'), x + 12, y + 22 + i * 17, `700 9px ${MONO}`, theme.colors[i], 'left');
   });
   g.globalAlpha = 1; g.fillStyle = '#e5faff'; g.beginPath(); g.arc(cx, cy, 3 + beat, 0, Math.PI * 2); g.fill();
   text(source ? 'FOUR TRACKS / ONE GROOVE' : 'LOADING THE GROOVE', x + 12, y + h - 10, `600 8px ${MONO}`, '#8e9bab', 'left');
@@ -1043,6 +1129,12 @@ function drawCard() {
   const bpm = source?.bpm || (e === DEMO ? BPM : null), duration = a.dur || source?.duration;
   const count = ready ? tracks.reduce((n, tr) => n + tr.notes.length, 0) : null;
   text(`${bpm ? Math.round(bpm) : '—'} BPM   /   ${duration ? mmss(duration) : '—'}   /   ${count ?? '—'} NOTES`, L, y + 236, `600 10px ${MONO}`, '#a6b6c8', 'left');
+  box(R - 136, y + 22, 128, 26, 13, 'rgba(3,12,20,.85)', '#627f8f');
+  text(`T · ${theme.name}`, R - 72, y + 40, `700 10px ${SANS}`, '#fff');
+  zone(R - 136, y + 22, 128, 26, () => chooseTheme());
+  const defaultY = y + h + 6;
+  text(`Default: ${THEMES[themeSettings.default].name} · SHIFT T to update`, (L + R) / 2, defaultY + 14, `600 10px ${MONO}`, '#a6b6c8');
+  zone(L, defaultY, R - L, 22, () => chooseTheme(true));
   const dy = y + 252, sw = (R - L) / 3;
   box(L, dy, R - L, 30, 8, null, 'rgba(255,255,255,.22)');
   LEVELS.forEach((lv, i) => { const on = i === level; if (on) box(L + i * sw + 2, dy + 2, sw - 4, 26, 6, '#fff');
@@ -1066,6 +1158,7 @@ function drawHelp() {
   text('CONTROLS', W / 2, 84, `italic 900 34px ${SANS}`, '#fff', 'center', 20);
   [['MENU'], ['↑ ↓', 'choose a song'], ['← →', 'difficulty'], ['ENTER', 'play  (or click the song twice)'], ['O', 'add audio files, or drop them anywhere'],
    ['F', 'find a song on Audius'], ['X  X', 'delete a song from your library'], ['[  ]', 'audio offset: raise if notes feel early, lower if late'],
+   ['T / SHIFT T', 'change theme / set current theme as default'],
    ['PLAYING'], ['J  K  L', 'hit the left, middle and right lane'], ['A  D', 'switch track, including AUTO (or ← →)'], ['SPACE / ESC', 'pause · resume, restart or return to menu'], ['SPACE', 'play again, on the results screen']]
     .forEach(([k, s], i) => { const y = 128 + i * 28 + (i > 7 ? 10 : 0);
       if (!s) text(k, 150, y, `800 10px ${MONO}`, `hsl(${hue},90%,78%)`, 'left');
@@ -1140,7 +1233,7 @@ function drawResults() {
   text('SPACE  play again       ESC  song selection', W / 2, 558, `800 14px ${MONO}`, '#fff');
 }
 
-setGrid(song); tracks = buildTracks(); rebuild();
+setGrid(song); tracks = buildTracks(); rebuild(); applyTheme(catalog[sel]);
 requestAnimationFrame(frame);
 
 // Self-check: every phrase of every demo chart has notes, no step is doubled, and the grid maps times to bars.
