@@ -61,12 +61,17 @@ let parts = [], pops = [], rings = [], press = [-9, -9, -9], laneHit = new Array
 const stars = Array.from({ length: 220 }, () => ({ x: Math.random() * 2 - 1, y: Math.random() * 2 - 1, z: Math.random() }));
 const LIVE = 1, CUE = .35, GHOST = .2; // stem volume: playing well / your track before a hit / other tracks (GHOST high enough to mask separation artifacts)
 // One piecewise-linear transport drives stems, synth scheduling and judgement.
+function tempoSegment(value, key) {
+  let lo = 0, hi = tempo.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (tempo[mid][key] <= value) lo = mid; else hi = mid - 1; }
+  return tempo[lo];
+}
 function songTime(elapsed) {
-  const s = tempo.findLast(s => s.at <= elapsed) || tempo[0];
+  const s = tempoSegment(elapsed, 'at');
   return s.pos + (elapsed - s.at) * s.rate;
 }
 function audioTime(pos) {
-  const s = tempo.findLast(s => s.pos <= pos) || tempo[0];
+  const s = tempoSegment(pos, 'pos');
   return t0 + s.at + (pos - s.pos) / s.rate;
 }
 const now = () => mode === 'failed' ? failedAt : songTime(ac.currentTime - t0 - (ac.outputLatency || ac.baseLatency || 0) - offset);
@@ -129,8 +134,18 @@ function thin(notes, lv) {
   }
   return out;
 }
-const buildTracks = () => song.tracks.map((tr, i) => ({ name: tr.name, kind: tr.kind, color: COLORS[i], capFrom: -1, capTo: -1, capAt: -9, live: false, hits: 0, misses: 0, caps: 0, timing: 0,
+const buildTracks = () => song.tracks.map((tr, i) => ({ name: tr.name, kind: tr.kind, color: COLORS[i], capFrom: -1, capTo: -1, capAt: -9, live: false, hits: 0, misses: 0, caps: 0, timing: 0, judged: 0,
   notes: thin(tr.notes, level).map(([t, lane]) => ({ t, lane, bar: bar(t), hit: false, missed: false })) }));
+
+// Stored charts are time-sorted; bound hot loops to the interval they actually use.
+function noteIndex(notes, t) {
+  let lo = 0, hi = notes.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (notes[mid].t < t) lo = mid + 1; else hi = mid; }
+  return lo;
+}
+function phraseNotes(tr, phrase) {
+  return tr.notes.slice(noteIndex(tr.notes, phrase ? bars[phrase * 2] : -Infinity), noteIndex(tr.notes, bars[phrase * 2 + 2] ?? Infinity));
+}
 
 const stopStems = () => { srcs.forEach(s => { s.stop(); s.onended?.(); }); srcs = []; };
 function reset(menuImage = null) {
@@ -409,7 +424,8 @@ const timingLabel = delta => Math.abs(delta) < .0005 ? 'ON TIME' : `${Math.round
 function tryHit(lane) {
   press[lane] = rt;
   const tr = tracks[cur], t = now();
-  const n = tr.notes.find(n => n.lane === lane && !n.hit && !auto(tr, n) && Math.abs(audioTime(t) - audioTime(n.t)) < LEVELS[level].win);
+  const window = LEVELS[level].win;
+  const n = tr.notes.slice(noteIndex(tr.notes, t - window), noteIndex(tr.notes, t + window)).find(n => n.lane === lane && !n.hit && !n.missed && !auto(tr, n) && Math.abs(audioTime(t) - audioTime(n.t)) < window);
   if (!n) return; // shortcut: no penalty for stray presses
   const delta = audioTime(t) - audioTime(n.t), perfect = Math.abs(delta) < PERFECT, x = trackX(cur) + (lane - 1) * LW;
   n.hit = true; hits++; tr.hits++; tr.timing += delta; score += (perfect ? 15 : 10) * mult; tr.live = true;
@@ -418,7 +434,7 @@ function tryHit(lane) {
   burst(x, HIT_Y, tr.color, perfect ? 18 : 9, 1); laneHit[cur * 3 + lane] = rt;
   popup(perfect ? 'PERFECT' : timingLabel(delta), x, HIT_Y - 46, perfect ? '#fff' : tr.color, perfect ? 17 : 14, .45);
   const p = Math.floor(n.bar / 2);
-  if (tr.notes.every(m => Math.floor(m.bar / 2) !== p || m.hit)) {
+  if (phraseNotes(tr, p).every(m => m.hit)) {
     const cx = trackX(cur);
     tr.capFrom = (p + 1) * 2; tr.capTo = tr.capFrom + CAPTURE_BARS; tr.capAt = rt; caps++; tr.caps++; changeGroove(15);
     popup('CAPTURED', cx, HIT_Y - 130, tr.color, 38, 1.1); popup(`+${100 * mult}`, cx, HIT_Y - 90, '#fff', 20, 1.1);
@@ -529,12 +545,21 @@ function logic(t) {
     for (let b = Math.ceil(sched / BARLEN); b * BARLEN < upto && b < BARS; b++) if (b >= 0) pad(b, audioTime(b * BARLEN));
   }
   for (const tr of tracks) {
-    for (const n of tr.notes) {
-      if (song.synth && auto(tr, n) && n.t >= sched && n.t < upto) play(tr.kind, n.lane, n.bar, audioTime(n.t));
-      if (!n.hit && !n.missed && audioTime(t) - audioTime(n.t) > LEVELS[level].win) { n.missed = true;
-        if (tr === tracks[cur] && !auto(tr, n)) { mult = 1; misses++; tr.misses++; missAt = rt; shake = Math.max(shake, 3); tr.live = false;
-          popup('MISS', trackX(cur) + (n.lane - 1) * LW, HIT_Y - 40, '#ff3355', 14, .5);
-          changeGroove(-(4 + Math.min(++missStreak, 4))); if (mode === 'failed') return; } }
+    if (song.synth) for (let k = noteIndex(tr.notes, sched); k < tr.notes.length && tr.notes[k].t < upto; k++) {
+      const n = tr.notes[k]; if (auto(tr, n)) play(tr.kind, n.lane, n.bar, audioTime(n.t));
+    }
+    const judgedAt = audioTime(t);
+    while (tr.judged < tr.notes.length) {
+      const n = tr.notes[tr.judged];
+      if (!n.hit && !n.missed && judgedAt - audioTime(n.t) <= LEVELS[level].win) break;
+      tr.judged++;
+      if (n.hit || n.missed) continue;
+      n.missed = true;
+      if (tr === tracks[cur] && !auto(tr, n)) {
+        mult = 1; misses++; tr.misses++; missAt = rt; shake = Math.max(shake, 3); tr.live = false;
+        popup('MISS', trackX(cur) + (n.lane - 1) * LW, HIT_Y - 40, '#ff3355', 14, .5);
+        changeGroove(-(4 + Math.min(++missStreak, 4))); if (mode === 'failed') return;
+      }
     }
     if (tr.gain) { const lv = locked(tr, t) ? LIVE : tr === tracks[cur] ? (tr.live ? LIVE : CUE) : GHOST;
       if (lv !== tr.level) { tr.level = lv; tr.gain.gain.setTargetAtTime(lv, ac.currentTime, .02); } }
@@ -751,8 +776,8 @@ function draw(t, playing) {
       g.globalAlpha = (phr ? .85 : br ? .35 : .12) * (me ? 1 : .55) * fade(d); g.lineWidth = phr ? 3 : 1; seg(x0, d, x1, d);
     }
     // notes
-    for (const n of tr.notes) {
-      const d = n.t - t; if (d < -.3 || d > LOOK || n.hit) continue;
+    for (let k = noteIndex(tr.notes, t - .3); k < tr.notes.length && tr.notes[k].t <= t + LOOK; k++) {
+      const n = tr.notes[k], d = n.t - t; if (n.hit) continue;
       const lx = x0 + n.lane * LW, au = auto(tr, n);
       g.fillStyle = tr.color;
       if (au && d < 0) { if (d > -.15) { g.globalAlpha = (1 + d / .15) * .7; quad(lx + 3, lx + LW - 3, -.05, .6); g.fill(); } continue; }
@@ -776,7 +801,7 @@ function draw(t, playing) {
     g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
     if (me) {
       for (let l = 0; l < 3; l++) text('JKL'[l], sx(x0 + l * LW + LW / 2), HIT_Y + 30, `600 13px ${MONO}`, 'rgba(255,255,255,.5)');
-      const ns = capd ? [] : tr.notes.filter(n => Math.floor(n.bar / 2) === ph && !auto(tr, n));
+      const ns = capd ? [] : phraseNotes(tr, ph).filter(n => !auto(tr, n));
       ns.forEach((n, k) => { g.fillStyle = n.hit ? tr.color : n.missed ? '#ff2244' : 'rgba(255,255,255,.22)';
         g.fillRect(sx(cx) + (k - (ns.length - 1) / 2) * 9 - 3, HIT_Y + 44, 6, 6); });
     }
