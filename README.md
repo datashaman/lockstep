@@ -38,7 +38,9 @@ The first song you add downloads the ~180 MB separation model once.
 | `[` `]` | audio offset | |
 | ? | all controls | |
 | J K L | | hit lanes |
-| Esc | | back to title |
+| Space / Esc | | pause |
+
+Space or Esc pauses the song. Resume with Space/Enter and a three-second count-in, restart with R, or return to song selection with Esc. Switching tabs pauses automatically.
 
 You can move onto captured (AUTO) tracks and back out again; silent tracks are skipped.
 
