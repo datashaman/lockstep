@@ -183,7 +183,7 @@ const idb = async (store, op, ...args) => { const d = await dbp; return new Prom
   const q = d.transaction(store, op.startsWith('get') ? 'readonly' : 'readwrite').objectStore(store)[op](...args);
   q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error); }); };
 const f2i = a => { const o = new Int16Array(a.length); for (let i = 0; i < a.length; i++) o[i] = Math.max(-1, Math.min(1, a[i])) * 32767; return o; };
-const i2f = a => { const o = new Float32Array(a.length); for (let i = 0; i < a.length; i++) o[i] = a[i] / 32767; return o; };
+const i2f = (a, o = new Float32Array(a.length)) => { for (let i = 0; i < a.length; i++) o[i] = a[i] / 32767; return o; };
 const hex = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
 
 const songLoads = new WeakMap();
@@ -206,7 +206,7 @@ async function decodeSong(e) {
       const row = await idb('songs', 'get', e.lib); await idb('songs', 'put', { ...row, song: e.meta });
     }
     return { ...e.meta, title: e.title, buffers: pcm.map(([l, r]) => { const b = ac.createBuffer(2, l.length, 44100);
-      b.copyToChannel(i2f(l), 0); b.copyToChannel(i2f(r), 1); return b; }) }; }
+      i2f(l, b.getChannelData(0)); i2f(r, b.getChannelData(1)); return b; }) }; }
   if (!e.slug) return demoSong();
   const base = `songs/${e.slug}/`, res = await fetch(base + 'song.json');
   if (!res.ok) throw new Error(`${base}song.json: ${res.status}`);

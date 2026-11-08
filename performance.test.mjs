@@ -101,3 +101,10 @@ for (let i = 0; i < 20; i++) {
   vm.runInContext('stopPreview(); assert.equal(countEdges(), previewBaseline)', context);
 }
 console.log('ok: 20 replay/preview/synth cycles, natural node cleanup, shared decoding, stale-cache eviction and idle worker release');
+
+vm.runInContext(`
+  const channel = new Float32Array(4);
+  assert.equal(i2f(new Int16Array([-32768, 0, 16384, 32767]), channel), channel);
+  assert.deepEqual(Array.from(channel), [-32768, 0, 16384, 32767].map(n => Math.fround(n / 32767)));
+`, context);
+console.log('ok: PCM conversion writes directly into the playback channel');
