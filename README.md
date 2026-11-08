@@ -40,7 +40,7 @@ The first song you add downloads the ~180 MB separation model once.
 | J K L | | hit lanes |
 | Space / Esc | | pause |
 
-Choose a song’s look with **T** or the theme button on its sleeve: **Neon** or **Liquid Dream**. **Shift+T** (or the default control beneath the sleeve) makes the current look the default for songs without a saved choice. Theme choices stay in this browser and do not change charts or timing.
+Choose a song’s look with **T** or the theme button on its sleeve: **Neon**, **Liquid Dream**, **Paper City** or **Circuit Cathedral**. **Shift+T** (or the default control beneath the sleeve) makes the current look the default for songs without a saved choice. Theme choices stay in this browser and do not change charts or timing.
 
 Space or Esc pauses the song. Resume with Space/Enter and a three-second count-in, restart with R, or return to song selection with Esc. Switching tabs pauses automatically.
 

@@ -409,7 +409,7 @@ vm.runInContext(`
   assert.deepEqual(P(20, 1), projected); assert.equal(score, beforeThemeScore); assert.equal(t0, beforeThemeTime);
   assert.equal(tracks[0].color, THEMES.liquid.colors[0]);
   chooseTheme(true); sel = 1; applyTheme(catalog[sel]); assert.equal(theme.name, 'Liquid Dream');
-  chooseTheme(); assert.equal(theme.name, 'Neon');
+  chooseTheme(); assert.equal(theme.name, 'Paper City');
   sel = 0; applyTheme(DEMO); assert.equal(theme.name, 'Liquid Dream', 'per-song choice survives default/other-song changes');
   mode = 'play'; rt = 300; flash = null; dash = null; inSync = false;
   tracks.forEach((tr, i) => { tr.capAt = 299; tr.capTo = i < 2 ? 8 : -1; });
@@ -429,3 +429,29 @@ for (const stored of ['{invalid', 'null', JSON.stringify({ default: 'unknown', s
   assert.equal(vm.runInContext('theme.name', fresh), stored.includes('liquid') ? 'Liquid Dream' : 'Neon');
 }
 console.log('ok: per-song/default theme persistence, invalid storage fallback, unchanged gameplay geometry, liquid rendering and reduced motion');
+
+vm.runInContext(`
+  themeSettings = { default: 'neon', songs: {} }; catalog = [DEMO]; sel = 0; applyTheme(DEMO);
+  const themeCycle = [];
+  for (let i = 0; i < 4; i++) { chooseTheme(); themeCycle.push(theme.name); }
+  assert.deepEqual(themeCycle, ['Liquid Dream', 'Paper City', 'Circuit Cathedral', 'Neon']);
+  const themeNotes = tracks.map(tr => tr.notes.map(n => [n.t, n.lane]));
+  for (const key of ['paper', 'circuit']) {
+    themeSettings.songs.demo = key; applyTheme(DEMO); chooseTheme(true);
+    assert.equal(JSON.parse(localStorage.lockstepThemes).default, key);
+    draw(2, true); drawCraft(); drawSleeve(song, 48, 136, 310, 190, false); drawResults();
+    assert.deepEqual(tracks.map(tr => tr.notes.map(n => [n.t, n.lane])), themeNotes);
+  }
+`, context);
+for (const key of ['paper', 'circuit']) {
+  const fresh = vm.createContext({ ...context, localStorage: { lockstepThemes: JSON.stringify({ default: key }) } });
+  vm.runInContext(source, fresh);
+  assert.equal(vm.runInContext('theme.name', fresh), key === 'paper' ? 'Paper City' : 'Circuit Cathedral');
+  calls = [];
+  vm.runInContext(`theme = THEMES.${key}; drawBuiltWorld(2, false, 400, 190)`, context);
+  const still = calls;
+  calls = [];
+  vm.runInContext('drawBuiltWorld(4, false, 400, 190)', context);
+  assert.deepEqual(calls, still, 'new scenery has no continuous idle motion');
+}
+console.log('ok: four-theme cycle, new theme persistence, rendering, unchanged chart data and static scenery');
