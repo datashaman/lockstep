@@ -369,6 +369,7 @@ addEventListener('pointerdown', () => ac?.state === 'suspended' && ac.resume());
 function onKey(e) {
   if (e.metaKey || e.ctrlKey) return;
   if (!e.pad && ac?.state === 'suspended') ac.resume(); // a controller started audio before the browser allowed it
+  if (mode === 'find') { lastInput = e.pad ? 'pad' : 'key'; return findKey(e); } // before the global keys: the search box takes letters and [ ]
   const k = e.key.toLowerCase();
   if (k === '[' || k === ']') { // calibration: raise if notes feel early vs the music, lower if late; on a controller, its extra lag
     const d = k === ']' ? .01 : -.01; offsetAt = rt;
@@ -376,7 +377,6 @@ function onKey(e) {
     else { offset = Math.round((offset + d) * 100) / 100; try { localStorage.lockstepOffset = offset; } catch {} }
     return; }
   lastInput = e.pad ? 'pad' : 'key';
-  if (mode === 'find') return findKey(e); // before the global keys: the search box takes letters
   if (e.repeat) return;
   if (mode === 'title') {
     if (!ac) { initAudio(); showSelected(); } // first key: audio is allowed now, so start the backdrop song
