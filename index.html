@@ -52,6 +52,7 @@ let offset = +(globalThis.localStorage?.lockstepOffset || 0), offsetAt = -9; // 
 let beats, bars, gridDown;
 let hits = 0, misses = 0, caps = 0, shown = 0, rt = 0, last = performance.now() / 1000, phase = 0, pulse = 0;
 let camX = 0, camTo = 0, bendX = 0, bendY = 0, bendAmp = .6, hue = HUES[0], shake = 0, missAt = -9, flash = null;
+let dash = null;
 let parts = [], pops = [], rings = [], press = [-9, -9, -9], laneHit = new Array(12).fill(-9);
 const stars = Array.from({ length: 220 }, () => ({ x: Math.random() * 2 - 1, y: Math.random() * 2 - 1, z: Math.random() }));
 const LIVE = 1, CUE = .35, GHOST = .2; // stem volume: playing well / your track before a hit / other tracks (GHOST high enough to mask separation artifacts)
@@ -95,7 +96,7 @@ const buildTracks = () => song.tracks.map((tr, i) => ({ name: tr.name, kind: tr.
 const stopStems = () => { srcs.forEach(s => s.stop()); srcs = []; };
 function reset() {
   setGrid(song); tracks = buildTracks(); cur = Math.max(0, tracks.findIndex(tr => tr.notes.length)); score = 0; mult = 1; mode = 'play'; hits = misses = caps = 0; shown = 0;
-  parts = []; pops = []; rings = []; flash = null;
+  parts = []; pops = []; rings = []; flash = null; dash = null; laneHit.fill(-9);
   t0 = ac.currentTime + LEAD_IN; sched = -LEAD_IN;
   stopStems();
   if (song.buffers) tracks.forEach((tr, i) => { const s = ac.createBufferSource(), v = ac.createGain();
@@ -338,6 +339,7 @@ const playable = (tr, t) => tr.notes.length && !locked(tr, t);
 function next(dir, t) { for (let j = cur + dir; j >= 0 && j < tracks.length; j += dir) if (playable(tracks[j], t)) return j; return -1; }
 function move(dir) {
   const j = next(dir, now()); if (j < 0) return;
+  dash = { from: craftX(), to: trackX(j), at: rt };
   hiss(ac.currentTime, .12, .06, 3000); tracks[cur].live = false; cur = j;
 }
 
@@ -504,6 +506,41 @@ function drawWorld(t, playing, vx, vy) {
   g.restore();
 }
 
+// Keep the craft below the judgement line and above the keyboard hints.
+function craftX() {
+  if (!dash || reducedMotion?.matches) return trackX(cur);
+  const q = Math.max(0, Math.min(1, (rt - dash.at) / .16));
+  return dash.from + (dash.to - dash.from) * (1 - (1 - q) ** 3);
+}
+function drawCraft() {
+  const x = sx(craftX()), y = HIT_Y + 7, age = dash ? rt - dash.at : 1;
+  const charge = flash ? Math.max(0, 1 - (rt - flash.born) / 1.2) : 0;
+  const color = charge ? flash.color : tracks[cur].color;
+  g.save();
+  if (dash && age >= 0 && age < .24 && !reducedMotion?.matches) {
+    g.globalAlpha = (1 - age / .24) * .45; g.strokeStyle = color;
+    for (const dy of [2, 7]) {
+      g.lineWidth = dy === 2 ? 3 : 1; g.beginPath(); g.moveTo(sx(dash.from), y + dy); g.lineTo(x, y + dy); g.stroke();
+    }
+  }
+  g.globalAlpha = 1; g.fillStyle = '#080e19'; g.strokeStyle = color; g.lineWidth = 1.5;
+  g.beginPath(); g.moveTo(x, y - 3); g.lineTo(x + 22, y + 2); g.lineTo(x + 76, y);
+  g.lineTo(x + 64, y + 10); g.lineTo(x + 16, y + 7); g.lineTo(x, y + 10);
+  g.lineTo(x - 16, y + 7); g.lineTo(x - 64, y + 10); g.lineTo(x - 76, y); g.lineTo(x - 22, y + 2);
+  g.closePath(); g.fill(); g.stroke();
+  if (charge) { g.globalAlpha = charge * .55; g.fillStyle = color; g.fill(); }
+  g.globalAlpha = 1; g.fillStyle = '#e5faff'; g.beginPath();
+  g.moveTo(x, y); g.lineTo(x + 5, y + 5); g.lineTo(x - 5, y + 5); g.closePath(); g.fill();
+  for (let lane = 0; lane < 3; lane++) {
+    const hit = Math.max(0, 1 - (rt - laneHit[cur * 3 + lane]) / .18), ex = x + (lane - 1) * LW;
+    g.globalAlpha = .4 + hit * .6; g.fillStyle = hit ? '#fff' : color;
+    g.fillRect(ex - 4, y + 8, 8, 3);
+    g.globalAlpha = .25 + hit * .6; g.beginPath(); g.moveTo(ex - 3, y + 11);
+    g.lineTo(ex, y + 13 + hit * 5); g.lineTo(ex + 3, y + 11); g.closePath(); g.fill();
+  }
+  g.restore();
+}
+
 function draw(t, playing) {
   const b = bar(t), dh = ((HUES[b % 4] - hue) % 360 + 540) % 360 - 180;
   hue += dh * .04;
@@ -618,6 +655,7 @@ function draw(t, playing) {
 
   // ---------- HUD (no camera transform) ----------
   g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (mode === 'play') drawCraft();
   if (flash && rt - flash.born < .35) { g.globalCompositeOperation = 'lighter'; g.globalAlpha = .3 * (1 - (rt - flash.born) / .35);
     g.fillStyle = flash.color; g.fillRect(0, 0, W, H); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; }
   if (rt - offsetAt < 1.5) text(`audio offset ${offset >= 0 ? '+' : ''}${Math.round(offset * 1000)} ms`, W / 2, 545, `700 13px ${MONO}`, '#fff');
