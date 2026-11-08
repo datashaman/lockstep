@@ -770,10 +770,56 @@ function clipScenery(vx, vy) {
   g.moveTo(-200, vy); g.lineTo(vx - 35, vy); g.lineTo(vx - 430, H + 200); g.lineTo(-200, H + 200); g.closePath();
   g.moveTo(vx + 35, vy); g.lineTo(W + 200, vy); g.lineTo(W + 200, H + 200); g.lineTo(vx + 430, H + 200); g.closePath(); g.clip();
 }
-function drawMaterial(vx, vy) {
+function drawMaterial(vx, vy, t = 0) {
   const surface = materialTexture(); if (!surface) return;
   g.save(); clipScenery(vx, vy); g.globalCompositeOperation = 'source-over'; g.globalAlpha = isPaper() ? .75 : .65;
-  g.drawImage(surface, -100, -100, W + 200, H + 200); g.restore();
+  const drift = isLiquid() && !reducedMotion?.matches ? Math.sin(barF(t) * .3) * 18 : 0;
+  g.drawImage(surface, -100 + drift, -100 + drift * .4, W + 200, H + 200); g.restore();
+}
+
+// Capture timestamps already reset with the song: effects need no particle queues or timers.
+function drawCaptureMaterial(t, playing, vx, vy) {
+  if (!playing || reducedMotion?.matches) return;
+  g.save(); clipScenery(vx, vy);
+  g.globalCompositeOperation = isPaper() ? 'source-over' : 'lighter';
+  tracks.forEach((tr, i) => {
+    const age = rt - tr.capAt;
+    if (!tr.notes.length || !locked(tr, t) || age < 0 || age >= 1.6) return;
+    const q = age / 1.6, x = vx + (i - 1.5) * 100, y = vy - 30;
+    g.strokeStyle = tr.color; g.fillStyle = tr.color; g.globalAlpha = (1 - q) * .5; g.lineWidth = 2;
+    if (isLiquid()) {
+      for (let ring = 0; ring < 2; ring++) {
+        const radius = 12 + q * 210 + ring * 22;
+        g.beginPath(); g.ellipse(x, y, radius, radius * .28, -.15 + i * .1, 0, Math.PI * 2); g.stroke();
+      }
+    } else if (isPaper()) {
+      // An irregular ink bloom, deterministic for each instrument rather than noisy each frame.
+      g.globalAlpha *= .45; g.beginPath();
+      for (let point = 0; point < 18; point++) {
+        const a = point / 18 * Math.PI * 2, radius = (12 + Math.sqrt(q) * 100) * (.8 + Math.sin(point * 7 + i) * .16);
+        const px = x + Math.cos(a) * radius, py = y + Math.sin(a) * radius * .6;
+        if (!point) g.moveTo(px, py); else g.lineTo(px, py);
+      }
+      g.closePath(); g.fill();
+    } else if (isCircuit()) {
+      const width = 100 + i * 85, top = vy - 55 - i * 32;
+      for (const side of [-1, 1]) {
+        g.beginPath(); g.moveTo(vx + side * width, vy + 40); g.lineTo(vx + side * width, top + 35);
+        g.lineTo(vx, top); g.stroke();
+        const distance = q * 2;
+        const px = distance < 1 ? vx + side * width : vx + side * width * (2 - distance);
+        const py = distance < 1 ? vy + 40 + (top - vy - 5) * distance : top + 35 * (2 - distance);
+        g.fillRect(px - 3, py - 3, 6, 6);
+      }
+    } else {
+      // A light sweep reflected in the verges, leaving the timing lanes unfiltered.
+      const radius = 24 + q * 240;
+      for (const sign of [-1, 1]) {
+        g.beginPath(); g.moveTo(x - radius, y + sign * q * 65); g.lineTo(x + radius, y + sign * q * 65); g.stroke();
+      }
+    }
+  });
+  g.restore();
 }
 
 // Capture strength follows the existing lock lifetime; scenery never outlives its instrument.
@@ -1002,7 +1048,8 @@ function draw(t, playing) {
   g.fillStyle = `hsla(${hue},90%,72%,${.45 + pulse * .55})`; g.fillRect(-200, vy - 1, W + 400, 2);
 
   drawWorld(t, playing, vx, vy);
-  drawMaterial(vx, vy);
+  drawMaterial(vx, vy, t);
+  drawCaptureMaterial(t, playing, vx, vy);
 
   const ph = Math.floor(b / 2);
   tracks.forEach((tr, i) => {
