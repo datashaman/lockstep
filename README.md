@@ -43,6 +43,23 @@ The first song you add downloads the ~180 MB separation model once.
 The title screen also works with the mouse: click a song to select it and again to play, or click the buttons.
 Your best grade and score for each song and difficulty are kept in this browser.
 
+### Controller
+
+Xbox, PlayStation and most other controllers work over USB or Bluetooth (anything the browser reports as a standard gamepad).
+
+| Button | Menu | In game |
+| --- | --- | --- |
+| D-pad / left stick | ↑ ↓ song, ← → difficulty | ← → switch track |
+| X · A · B | A play, B back | left · middle · right lane |
+| LB / RB | | switch track |
+| Y | find on Audius | |
+| LT / RT | controller lag −/+ 10 ms | |
+| View | all controls | back to the menu |
+| Menu ☰ | play | back to the menu |
+
+Browsers don't let a controller switch sound on, so click or press any key once after the page loads. Captures and misses
+rumble on controllers that support it (Chrome, Edge).
+
 ## Offline charting (optional)
 
 `prep.py` does the same separation and charting in Python and writes `songs/<slug>/` for songs served
