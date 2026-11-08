@@ -230,7 +230,7 @@ function showSelected() {
 }
 const attract = () => { if (!pv.length) return rt % song.duration;
   const el = Math.max(0, ac.currentTime - pvT0 - (ac.outputLatency || ac.baseLatency || 0)); return pvFrom + el % Math.max(1, song.duration - pvFrom); };
-const pick = i => { if (i >= 0 && i !== sel) { sel = i; showSelected(); } };
+const pick = i => { if (i >= 0 && i !== sel) { sel = i; titleEntry = null; showSelected(); } };
 function setLevel(lv) { level = Math.max(0, Math.min(2, lv)); if (globalThis.localStorage) localStorage.lockstepLevel = level; setGrid(song); tracks = buildTracks(); }
 
 // Add songs: decode -> separate + chart in a worker (separator.js) -> store stems as 16-bit PCM in IndexedDB.
@@ -845,6 +845,25 @@ function box(x, y, w, h, r, fill, stroke) { g.beginPath(); g.roundRect(x, y, w, 
   if (fill) { g.fillStyle = fill; g.fill(); } if (stroke) { g.strokeStyle = stroke; g.lineWidth = 1; g.stroke(); } }
 const tw = (s, font) => { g.font = font; return g.measureText(s).width || 0; };
 function fit(s, w, font) { if (tw(s, font) <= w) return s; while (s.length > 1 && tw(s + '…', font) > w) s = s.slice(0, -1); return s + '…'; }
+let titleEntry = null, titleStarted = 0;
+function titleOffset(width, viewport, elapsed, still = false) {
+  const overflow = Math.max(0, width - viewport); if (!overflow) return 0;
+  const age = Math.max(0, elapsed);
+  // Reduced motion uses overlapping static pages instead of a moving marquee.
+  if (still) return Math.min(overflow, (Math.floor(age / 3) % (Math.ceil(overflow / (viewport * .8)) + 1)) * viewport * .8);
+  const hold = 1.25, travel = overflow / 28, phase = age % (2 * (hold + travel));
+  if (phase < hold) return 0;
+  if (phase < hold + travel) return (phase - hold) * 28;
+  if (phase < 2 * hold + travel) return overflow;
+  return overflow - (phase - 2 * hold - travel) * 28;
+}
+function selectedTitle(s, x, y, w, font, color, entry) {
+  if (titleEntry !== entry) { titleEntry = entry; titleStarted = rt; }
+  const shift = titleOffset(tw(s, font), w, rt - titleStarted, reducedMotion?.matches);
+  g.save(); g.beginPath(); g.rect(x, y - 34, w, 42); g.clip();
+  text(s, x - shift, y, font, color, 'left'); g.restore();
+}
+
 function wrap(s, x, y, w, lh, font, color) { let line = '';
   for (const word of s.split(' ')) { if (line && tw(line + ' ' + word, font) > w) { text(line, x, y, font, color, 'left'); y += lh; line = word; } else line = line ? line + ' ' + word : word; }
   text(line, x, y, font, color, 'left'); }
@@ -898,7 +917,8 @@ function drawList() {
       const e = r.e, on = e === catalog[sel], a = about(e), f = `${on ? 800 : 500} 15px ${SANS}`, mf = `500 11px ${MONO}`;
       if (on) { box(L, y + 2, R - L, r.h - 4, 7, 'rgba(255,255,255,.1)'); g.fillStyle = `hsl(${hue},90%,75%)`; g.fillRect(L, y + 7, 3, r.h - 14); }
       const nm = fit(a.name, 250, f), ax = L + 14 + tw(nm, f) + 8;
-      text(nm, L + 14, y + 21, f, on ? '#fff' : 'rgba(255,255,255,.62)', 'left');
+      if (on) selectedTitle(a.name, L + 14, y + 21, 250, f, '#fff', e);
+      else text(nm, L + 14, y + 21, f, 'rgba(255,255,255,.62)', 'left');
       if (a.artist && R - 54 - ax > 30) text(fit(a.artist, R - 54 - ax, mf), ax, y + 21, mf, 'rgba(255,255,255,.4)', 'left');
       if (a.dur) text(mmss(a.dur), R - 10, y + 21, mf, 'rgba(255,255,255,.4)', 'right');
       const i = catalog.indexOf(e); zone(L, Math.max(LIST.y, y), R - L, Math.min(y + r.h, LIST.y + LIST.h) - Math.max(LIST.y, y), () => on ? start() : pick(i));
@@ -974,7 +994,7 @@ function drawCard() {
   const a = about(e), ready = pvFor === e && mode !== 'loading';
   const source = e === DEMO ? demoSleeve : e.song || e.meta || (ready ? song : null);
   drawSleeve(source, L, y + 14, R - L, 140, ready && ac?.state === 'running');
-  text(fit(a.name, R - L, `900 30px ${SANS}`), L, y + 190, `900 30px ${SANS}`, '#fff', 'left');
+  selectedTitle(a.name, L, y + 190, R - L, `900 30px ${SANS}`, '#fff', e);
   text(fit(a.artist || 'FOUR-TRACK SESSION', R - L, `600 12px ${SANS}`), L, y + 211, `600 12px ${SANS}`, '#a6b6c8', 'left');
   const bpm = source?.bpm || (e === DEMO ? BPM : null), duration = a.dur || source?.duration;
   const count = ready ? tracks.reduce((n, tr) => n + tr.notes.length, 0) : null;
