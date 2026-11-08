@@ -92,7 +92,7 @@ function thin(notes, lv) {
   }
   return out;
 }
-const buildTracks = () => song.tracks.map((tr, i) => ({ name: tr.name, kind: tr.kind, color: COLORS[i], capFrom: -1, capTo: -1, capAt: -9, live: false, hits: 0, misses: 0, caps: 0,
+const buildTracks = () => song.tracks.map((tr, i) => ({ name: tr.name, kind: tr.kind, color: COLORS[i], capFrom: -1, capTo: -1, capAt: -9, live: false, hits: 0, misses: 0, caps: 0, timing: 0,
   notes: thin(tr.notes, level).map(([t, lane]) => ({ t, lane, bar: bar(t), hit: false, missed: false })) }));
 
 const stopStems = () => { srcs.forEach(s => s.stop()); srcs = []; };
@@ -349,16 +349,18 @@ function move(dir) {
   hiss(ac.currentTime, .12, .06, 3000); tracks[cur].live = false; cur = j;
 }
 
+const timingLabel = delta => Math.abs(delta) < .0005 ? 'ON TIME' : `${Math.round(Math.abs(delta) * 1000)} ms ${delta < 0 ? 'EARLY' : 'LATE'}`;
+
 function tryHit(lane) {
   press[lane] = rt;
   const tr = tracks[cur], t = now();
   const n = tr.notes.find(n => n.lane === lane && !n.hit && !auto(tr, n) && Math.abs(n.t - t) < LEVELS[level].win);
   if (!n) return; // shortcut: no penalty for stray presses
-  const perfect = Math.abs(n.t - t) < PERFECT, x = trackX(cur) + (lane - 1) * LW;
-  n.hit = true; hits++; tr.hits++; score += (perfect ? 15 : 10) * mult; tr.live = true;
+  const delta = t - n.t, perfect = Math.abs(delta) < PERFECT, x = trackX(cur) + (lane - 1) * LW;
+  n.hit = true; hits++; tr.hits++; tr.timing += delta; score += (perfect ? 15 : 10) * mult; tr.live = true;
   if (song.synth) play(tr.kind, lane, n.bar, ac.currentTime);
   burst(x, HIT_Y, tr.color, perfect ? 18 : 9, 1); laneHit[cur * 3 + lane] = rt;
-  popup(perfect ? 'PERFECT' : 'GOOD', x, HIT_Y - 46, perfect ? '#fff' : tr.color, perfect ? 17 : 14, .45);
+  popup(perfect ? 'PERFECT' : timingLabel(delta), x, HIT_Y - 46, perfect ? '#fff' : tr.color, perfect ? 17 : 14, .45);
   const p = Math.floor(n.bar / 2);
   if (tr.notes.every(m => Math.floor(m.bar / 2) !== p || m.hit)) {
     const cx = trackX(cur);
@@ -995,17 +997,21 @@ function drawResults() {
   text(score.toLocaleString(), 752, 207, `700 34px ${MONO}`, '#fff', 'right');
   text(`${(acc * 100).toFixed(1)}% ACCURACY`, 752, 241, `600 12px ${MONO}`, '#a6b6c8', 'right');
   text(`${caps} CAPTURES`, 752, 264, `600 12px ${MONO}`, '#a6b6c8', 'right');
+  const totalTiming = tracks.reduce((sum, tr) => sum + tr.timing, 0);
+  text(hits ? `AVG ${timingLabel(totalTiming / hits)}` : 'AVG TIMING —', 752, 286, `600 11px ${MONO}`, '#a6b6c8', 'right');
   text(newBest ? 'NEW PERSONAL BEST' : `BEST  ${record ? record.score.toLocaleString() : '—'}`, 752, 308, `800 13px ${MONO}`, newBest ? '#3ddc97' : '#a6b6c8', 'right');
   text('INSTRUMENT', 64, 365, `700 10px ${MONO}`, '#a6b6c8', 'left');
-  text('HITS / MISSES', 440, 365, `700 10px ${MONO}`, '#a6b6c8', 'right');
-  text('ACCURACY', 594, 365, `700 10px ${MONO}`, '#a6b6c8', 'right');
+  text('HITS / MISSES', 380, 365, `700 10px ${MONO}`, '#a6b6c8', 'right');
+  text('ACCURACY', 500, 365, `700 10px ${MONO}`, '#a6b6c8', 'right');
+  text('AVG TIMING', 640, 365, `700 10px ${MONO}`, '#a6b6c8', 'right');
   text('CAPTURES', 736, 365, `700 10px ${MONO}`, '#a6b6c8', 'right');
   tracks.forEach((tr, i) => {
     const y = 393 + i * 29, attempts = tr.hits + tr.misses;
     if (i % 2 === 0) { g.fillStyle = 'rgba(255,255,255,.035)'; g.fillRect(48, y - 19, 704, 28); }
     text(tr.name, 64, y, `800 12px ${SANS}`, tr.color, 'left');
-    text(`${tr.hits} / ${tr.misses}`, 440, y, `600 12px ${MONO}`, '#fff', 'right');
-    text(attempts ? `${(tr.hits / attempts * 100).toFixed(1)}%` : tr.notes.length ? 'UNPLAYED' : 'SILENT', 594, y, `600 11px ${MONO}`, '#a6b6c8', 'right');
+    text(`${tr.hits} / ${tr.misses}`, 380, y, `600 12px ${MONO}`, '#fff', 'right');
+    text(attempts ? `${(tr.hits / attempts * 100).toFixed(1)}%` : tr.notes.length ? 'UNPLAYED' : 'SILENT', 500, y, `600 11px ${MONO}`, '#a6b6c8', 'right');
+    text(tr.hits ? timingLabel(tr.timing / tr.hits) : '—', 640, y, `600 10px ${MONO}`, '#a6b6c8', 'right');
     text(String(tr.caps), 736, y, `600 12px ${MONO}`, '#fff', 'right');
   });
   text('Manual hits and misses only · AUTO notes excluded', 48, 512, `500 10px ${MONO}`, '#a6b6c8', 'left');

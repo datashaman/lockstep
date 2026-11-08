@@ -268,3 +268,21 @@ vm.runInContext(`
   assert.equal(mode, 'pause'); assert.equal(pauseState.busy, false); assert.equal(pauseState.deadline, 0);
 `, context);
 console.log('ok: pause freezes song/effects, preserves score/captures/scheduler, countdown cancellation, restart and resume failure');
+
+vm.runInContext(`
+  pauseState = null; song = demoSong(); song.synth = false; ac = { currentTime: .95 }; reset(); t0 = 0; offset = 0;
+  cur = 0; rt = 150;
+  tracks[0].notes = [1, 2, 3].map(t => ({ t, lane: 0, bar: 0, hit: false, missed: false }));
+  tryHit(0); assert.equal(pops.at(-1).text, '50 ms EARLY'); assert.equal(score, 10);
+  ac.currentTime = 2.01; tryHit(0); assert.equal(pops.at(-1).text, 'PERFECT'); assert.equal(score, 25);
+  offset = .02; ac.currentTime = 3.07; tryHit(0);
+  assert.ok(pops.some(p => p.text === '50 ms LATE'), 'feedback uses calibrated song time');
+  assert.equal(tracks[0].hits, 3); assert.ok(Math.abs(tracks[0].timing - .01) < 1e-9);
+  assert.equal(timingLabel(tracks[0].timing / 3), '3 ms LATE');
+  assert.equal(score, 135, 'hit and capture points unchanged');
+  const before = tracks[0].timing; ac.currentTime = 50; tryHit(0);
+  assert.equal(tracks[0].timing, before, 'stray presses excluded');
+  assert.equal(timingLabel(0), 'ON TIME');
+  drawResults(); reset(); assert.ok(tracks.every(tr => tr.timing === 0));
+`, context);
+console.log('ok: signed timing, perfect/early/late feedback, calibration, unchanged scoring, stray exclusion and reset');
