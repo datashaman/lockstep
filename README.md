@@ -11,6 +11,11 @@ Drop any audio file on the title screen and it is split into drums, bass, vocals
 automatically. Your songs never leave your machine: separation runs locally and the result is kept in
 the browser's own storage.
 
+No file handy? Pick **Find a song on Audius** on the title screen to browse trending tracks or type to search
+[Audius](https://audius.co), then press Enter to add one. Tracks stream straight from Audius and are used under the
+[Audius Open Music License](https://openaudiofoundation.org/open-music-license.pdf); each one keeps its artist's
+name and a link back to the track.
+
 ## Run
 
 ```sh
@@ -28,6 +33,7 @@ The first song you add downloads the ~180 MB separation model once.
 | ← → | difficulty | switch track (also A / D) |
 | Enter / Space | play | |
 | O | add a song | |
+| Enter on *Find a song on Audius* | search Audius: type, ↑ ↓, Enter to add, Esc back | |
 | X twice | delete a song | |
 | `[` `]` | audio offset | |
 | J K L | | hit lanes |

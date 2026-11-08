@@ -101,7 +101,7 @@ function reset() {
     s.buffer = song.buffers[i]; v.gain.value = 0; s.connect(v).connect(out); s.start(t0); srcs.push(s); tr.gain = v; tr.level = 0; });
 }
 // ---------- song sources: built-in demo · your library (separated in this browser, kept in IndexedDB) · songs/ (prep.py) ----------
-const DEMO = { title: 'Demo (synth)' }, ADD = { title: '＋  Add a song  (or drop audio files anywhere)', add: true };
+const DEMO = { title: 'Demo (synth)' }, ADD = { title: '＋  Add a song  (or drop audio files anywhere)', add: true }, FIND = { title: '⌕  Find a song on Audius', find: true };
 let library = [], server = [], job = null, jobs = [], worker, notice = '', noticeAt = -9, delArm = -9, CHART_V = 0;
 // Refresh cached copies of the worker's modules first (an older server let browsers keep stale ones), then read the chart version.
 Promise.all(['analyze.js', 'separator.js', 'vendor/demucs-web/fft.js'].map(f => globalThis.fetch?.(f, { cache: 'no-cache' }).catch(() => {})))
@@ -116,7 +116,7 @@ function work(msg, transfer = [], onProgress) { // run a job on the separator wo
   return new Promise((ok, no) => { pending.set(msg.id, { ok, no, onProgress }); worker.postMessage(msg, transfer); });
 }
 const say = s => { notice = s; noticeAt = rt; };
-const rebuild = () => { const was = catalog[sel]; catalog = [DEMO, ...library, ...server, ADD]; sel = Math.max(0, catalog.indexOf(was)); };
+const rebuild = () => { const was = catalog[sel]; catalog = [DEMO, ...library, ...server, ADD, FIND]; sel = Math.max(0, catalog.indexOf(was)); };
 const dbp = globalThis.indexedDB && new Promise((ok, no) => { const r = indexedDB.open('lockstep', 1);
   r.onupgradeneeded = () => { r.result.createObjectStore('songs', { keyPath: 'id' }); r.result.createObjectStore('pcm'); }; // pcm kept apart so listing stays cheap
   r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
@@ -146,6 +146,7 @@ async function loadSong(e) {
 }
 async function start() {
   if (catalog[sel].add) return picker.click();
+  if (catalog[sel].find) { mode = 'find'; if (!au.list.length) auSearch(); return; }
   if (!ac) initAudio();
   mode = 'loading'; loadErr = '';
   try { song = await loadSong(catalog[sel]); reset(); }
@@ -156,23 +157,25 @@ function toTitle() { stopStems(); mode = 'title'; }
 // Add songs: decode -> separate + chart in a worker (separator.js) -> store stems as 16-bit PCM in IndexedDB.
 const AUDIO = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|aiff?|webm)$/i;
 function addFiles(files) {
-  for (const f of files) if (f.type.startsWith('audio/') || AUDIO.test(f.name)) jobs.push(f); else say(`${f.name} isn't an audio file`);
+  for (const f of files) if (f.type.startsWith('audio/') || AUDIO.test(f.name)) jobs.push({ title: f.name.replace(/\.[^.]+$/, ''), bytes: () => f.arrayBuffer() });
+    else say(`${f.name} isn't an audio file`);
   if (!job) nextJob();
 }
 async function nextJob() {
-  const f = jobs.shift(); if (!f) return job = null;
-  job = { title: f.name.replace(/\.[^.]+$/, ''), phase: 'decode', progress: 0 };
+  const j = jobs.shift(); if (!j) return job = null; // j: { title, bytes: () => Promise<ArrayBuffer>, url? (where it came from) }
+  job = { title: j.title, phase: j.url ? 'download' : 'decode', progress: 0 };
   try {
-    const bytes = await f.arrayBuffer(), id = hex(await crypto.subtle.digest('SHA-256', bytes)).slice(0, 16);
+    const bytes = await j.bytes(); job.phase = 'decode';
+    const id = hex(await crypto.subtle.digest('SHA-256', bytes)).slice(0, 16);
     if (library.some(e => e.lib === id)) { say(`${job.title} is already in your library`); return nextJob(); }
     const ab = await new OfflineAudioContext(2, 1, 44100).decodeAudioData(bytes); // resamples to the model's 44.1 kHz
     const left = ab.getChannelData(0).slice(), right = ab.getChannelData(ab.numberOfChannels > 1 ? 1 : 0).slice();
     const { song: meta, stems } = await work({ id, left, right }, [left.buffer, right.buffer], d => Object.assign(job, d));
     job.phase = 'save';
     await idb('pcm', 'put', meta.tracks.map(tr => [f2i(stems[tr.stem].left), f2i(stems[tr.stem].right)]), id);
-    await idb('songs', 'put', { id, title: job.title, song: meta, added: Date.now() });
+    await idb('songs', 'put', { id, title: job.title, url: j.url, song: meta, added: Date.now() });
     navigator.storage?.persist?.(); // ask the browser not to evict the library under storage pressure
-    library.push({ title: job.title, lib: id, meta }); rebuild(); say(`added ${job.title} · ${meta.bpm} BPM`);
+    library.push({ title: job.title, url: j.url, lib: id, meta }); rebuild(); say(`added ${job.title} · ${meta.bpm} BPM`);
   } catch (err) { say(`${job.title}: ${err.message || err}`); }
   nextJob();
 }
@@ -185,8 +188,36 @@ picker.onchange = () => { addFiles(picker.files); picker.value = ''; };
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', e => { e.preventDefault(); addFiles(e.dataTransfer.files); });
 
-if (dbp) idb('songs', 'getAll').then(rows => { library = rows.sort((a, b) => a.added - b.added).map(r => ({ title: r.title, lib: r.id, meta: r.song })); rebuild(); }).catch(() => {});
+if (dbp) idb('songs', 'getAll').then(rows => { library = rows.sort((a, b) => a.added - b.added).map(r => ({ title: r.title, url: r.url, lib: r.id, meta: r.song })); rebuild(); }).catch(() => {});
 fetch('songs/index.json').then(r => r.json()).then(list => { server = list; rebuild(); }).catch(() => {}); // no songs/ yet, or file:// — fine
+
+// Audius: search or browse trending, then queue a track like a dropped file. Tracks are used under the Audius
+// Open Music License (OML), which licenses apps that play Audius audio; we credit the artist and link the track anyway.
+const AUDIUS = 'https://api.audius.co/v1/tracks', APP = 'app_name=lockstep';
+const au = { q: '', list: [], sel: 0, busy: false, err: '' }; let auN = 0, auTimer;
+function auSearch() {
+  const n = ++auN, q = au.q.trim(); au.busy = true; au.err = '';
+  fetch(q ? `${AUDIUS}/search?query=${encodeURIComponent(q)}&limit=50&${APP}` : `${AUDIUS}/trending?limit=50&${APP}`)
+    .then(r => r.ok ? r.json() : Promise.reject(new Error(`Audius said ${r.status}`)))
+    .then(({ data }) => { if (n !== auN) return; au.busy = false; au.sel = 0; // ≤10 min: separation takes ~20 s and ~40 MB per minute
+      au.list = data.filter(t => t.is_streamable && t.access?.stream && t.duration >= 30 && t.duration <= 600); })
+    .catch(err => { if (n === auN) { au.busy = false; au.err = err.message || String(err); } });
+}
+function findKey(e) {
+  const t = au.list[au.sel];
+  if (e.key === 'Escape') mode = 'title';
+  else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') au.sel = Math.max(0, Math.min(au.list.length - 1, au.sel + (e.key === 'ArrowUp' ? -1 : 1)));
+  else if (e.key === 'Enter' && t) {
+    jobs.push({ title: `${t.title} — ${t.user.name}`, url: `https://audius.co${t.permalink}`,
+      bytes: () => fetch(`${AUDIUS}/${t.id}/stream?${APP}`).then(r => r.ok ? r.arrayBuffer() : Promise.reject(new Error(`Audius stream ${r.status}`))) });
+    if (!job) nextJob();
+    mode = 'title'; sel = catalog.indexOf(ADD); say(`adding ${t.title}`);
+  } else if (e.key === 'Backspace' || e.key.length === 1) { // typing: search after a short pause
+    au.q = e.key === 'Backspace' ? au.q.slice(0, -1) : (au.q + e.key).slice(0, 40);
+    clearTimeout(auTimer); auTimer = setTimeout(auSearch, 300);
+  } else return;
+  e.preventDefault?.();
+}
 
 // ---------- audio ----------
 const hz = m => 440 * 2 ** ((m - 69) / 12);
@@ -286,7 +317,9 @@ function tryHit(lane) {
 }
 
 addEventListener('keydown', e => {
-  if (e.repeat || e.metaKey || e.ctrlKey) return;
+  if (e.metaKey || e.ctrlKey) return;
+  if (mode === 'find') return findKey(e); // before the global keys: the search box takes [ ] and letters
+  if (e.repeat) return;
   const k = e.key.toLowerCase();
   if (k === '[' || k === ']') { // calibration: raise if notes feel early vs the music, lower if late
     offset = Math.round((offset + (k === ']' ? .01 : -.01)) * 100) / 100; offsetAt = rt;
@@ -483,6 +516,7 @@ function draw(t, playing) {
 }
 
 function drawTitle() {
+  if (mode === 'find') return drawFind();
   g.fillStyle = 'rgba(3,2,6,.5)'; g.fillRect(0, 0, W, H);
   text('LOCKSTEP', W / 2, 180, `italic 900 ${80 + pulse * 6}px ${SANS}`, '#fff', 'center', 40);
   text('capture the groove, one track at a time', W / 2, 214, `500 15px ${SANS}`, `hsl(${hue},90%,78%)`);
@@ -491,16 +525,31 @@ function drawTitle() {
   catalog.slice(top, top + 6).forEach((e, k) => { const on = top + k === sel;
     text(`${on ? '▶  ' : ''}${e.lib ? '♪ ' : ''}${clip(e.title)}`, W / 2, 270 + k * 30, `${on ? 800 : 500} ${on ? 20 : 16}px ${SANS}`, on ? '#fff' : 'rgba(255,255,255,.45)', 'center', on ? 14 : 0); });
   if (job) { // background separation progress
-    const label = { decode: 'reading file', model: 'downloading the separation model (first time only, ~180 MB)', separate: 'separating stems', chart: 'charting notes', save: 'saving' }[job.phase];
+    const label = { download: 'downloading from Audius', decode: 'reading file', model: 'downloading the separation model (first time only, ~180 MB)', separate: 'separating stems', chart: 'charting notes', save: 'saving' }[job.phase];
     text(`${clip(job.title)} — ${label}${jobs.length ? `   (+${jobs.length} queued)` : ''}`, W / 2, 455, `600 12px ${MONO}`, 'rgba(255,255,255,.8)');
     g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(W / 2 - 150, 463, 300, 3);
     g.fillStyle = `hsl(${hue},90%,70%)`; g.fillRect(W / 2 - 150, 463, 300 * (job.progress || 0), 3);
   }
+  if (catalog[sel]?.url) text(`from ${catalog[sel].url.replace('https://', '')}`, W / 2, 482, `600 11px ${MONO}`, 'rgba(255,255,255,.5)');
   if (mode === 'loading') text('LOADING STEMS…', W / 2, 500, `800 16px ${SANS}`, `hsl(${hue},90%,78%)`);
   else if (loadErr) text(loadErr, W / 2, 500, `600 13px ${MONO}`, '#ff4466');
   else if (rt - noticeAt < 4) text(notice, W / 2, 500, `700 14px ${SANS}`, `hsl(${hue},90%,80%)`);
-  else if (Math.floor(rt * 2) % 2) text(catalog[sel]?.add ? 'ENTER pick audio files   ·   or drop them on this page' : '↑ ↓ choose    ENTER play', W / 2, 500, `800 16px ${SANS}`, '#fff', 'center', 14);
+  else if (Math.floor(rt * 2) % 2) text(catalog[sel]?.add ? 'ENTER pick audio files   ·   or drop them on this page' : catalog[sel]?.find ? 'ENTER search Audius for free music' : '↑ ↓ choose    ENTER play', W / 2, 500, `800 16px ${SANS}`, '#fff', 'center', 14);
   text(`←→ difficulty · J K L hit · A/D switch · ESC menu · O add song · X delete · [ ] offset ${Math.round(offset * 1000)} ms`, W / 2, 540, `600 12px ${MONO}`, 'rgba(255,255,255,.55)');
+}
+
+function drawFind() {
+  g.fillStyle = 'rgba(3,2,6,.72)'; g.fillRect(0, 0, W, H);
+  text('FIND ON AUDIUS', W / 2, 100, `italic 900 44px ${SANS}`, '#fff', 'center', 24);
+  text(`${au.q}${Math.floor(rt * 2) % 2 ? '▍' : ' '}`, W / 2, 150, `700 22px ${MONO}`, `hsl(${hue},90%,78%)`);
+  text(au.busy ? 'searching…' : au.err ? au.err : !au.list.length ? 'nothing playable found (tracks up to 10 min)' : au.q.trim() ? 'type to search' : 'trending now · type to search',
+    W / 2, 178, `600 12px ${MONO}`, au.err ? '#ff4466' : 'rgba(255,255,255,.5)');
+  const top = Math.max(0, Math.min(au.sel - 4, au.list.length - 9)), clip = (t, n) => t.length > n ? t.slice(0, n - 1) + '…' : t;
+  au.list.slice(top, top + 9).forEach((t, k) => { const on = top + k === au.sel, y = 220 + k * 30;
+    text(`${on ? '▶  ' : ''}${clip(t.title, 38)}`, 110, y, `${on ? 800 : 500} ${on ? 18 : 15}px ${SANS}`, on ? '#fff' : 'rgba(255,255,255,.55)', 'left', on ? 12 : 0);
+    text(`${clip(t.user.name, 22)}  ${Math.floor(t.duration / 60)}:${String(t.duration % 60).padStart(2, '0')}`, 690, y, `500 13px ${MONO}`, on ? `hsl(${hue},90%,80%)` : 'rgba(255,255,255,.4)', 'right'); });
+  text('↑ ↓ choose    ENTER add to your library    ESC back', W / 2, 520, `800 14px ${SANS}`, '#fff');
+  text('Music streamed from audius.co by its artists, under the Audius Open Music License', W / 2, 560, `500 11px ${MONO}`, 'rgba(255,255,255,.45)');
 }
 
 function drawResults() {
