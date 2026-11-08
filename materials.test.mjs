@@ -54,8 +54,8 @@ assert.equal(surfaces, 4, 'replays and theme changes retain exactly four surface
 assert.equal(builds, built, 'no texture regeneration during rendering');
 assert.equal(blits, 20 * 4 * 60, 'one cached blit per frame');
 assert.equal(depth, 0, 'drawing state restored');
-assert.ok(calls.some(([key]) => key === 'clip'), 'texture excludes the highway centre');
-console.log('ok: four cached 400×300 materials (~1.83 MiB RGBA), one blit/frame, no regeneration over 20 plays, finite clipped geometry');
+assert.ok(!calls.some(([key]) => key === 'clip'), 'scenery has no straight wedge cutout');
+console.log('ok: four cached 400×300 materials (~1.83 MiB RGBA), one blit/frame, no regeneration over 20 plays, finite continuous scenery');
 
 vm.runInContext(`
   tracks.forEach(tr => { tr.capFrom = 0; tr.capTo = 8; tr.capAt = 10; });
