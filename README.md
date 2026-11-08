@@ -91,6 +91,8 @@ Liquid Dream additionally uses a single WebGL background pass for flowing colour
 
 Paper City uses the shared shader for stationary paper fibres, directional fold lighting, contact shadows and capture-driven ink blooms. Its light moves gently; reduced motion keeps it fixed.
 
+Circuit Cathedral adds stained-glass facets, dark leading, travelling etched-circuit light and coloured capture shafts through the same bounded renderer. All four themes now have shaders and retain their individual Canvas fallback materials.
+
 ## Tablet touch controls
 
 Landscape tablets get a touch dock below the game, keeping fingers away from the timing line. Left / Middle / Right hit the three lanes immediately on touch-down and accept simultaneous touches. Separate Track arrows switch instruments; Pause opens resume, restart and song-selection controls. Rotating into portrait while playing pauses the game.

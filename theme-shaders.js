@@ -69,7 +69,46 @@ void main() {
 }
 `;
 
-export const THEME_FRAGMENTS = { liquid: LIQUID_FRAGMENT, neon: NEON_FRAGMENT, paper: PAPER_FRAGMENT };
+export const CIRCUIT_FRAGMENT = `
+precision mediump float;
+varying vec2 uv;
+uniform float time;
+uniform float energy;
+uniform vec4 captures;
+vec3 glass(float index) {
+  if (index < 1.) return vec3(.75, .17, .32);
+  if (index < 2.) return vec3(.8, .58, .15);
+  if (index < 3.) return vec3(.13, .65, .43);
+  return vec3(.22, .38, .8);
+}
+void main() {
+  vec2 p = uv * vec2(6., 4.);
+  vec2 cell = fract(p);
+  float diagonal = abs(cell.x + cell.y - 1.) * .707;
+  float seam = min(min(cell.x, 1. - cell.x), min(min(cell.y, 1. - cell.y), diagonal));
+  float index = mod(floor(p.x) + floor(p.y) * 3., 4.);
+  vec3 tint = glass(index);
+  float facet = cell.x + cell.y < 1. ? .7 : 1.;
+  float shimmer = .8 + .2 * sin(time + uv.x * 5. - uv.y * 3.);
+  vec3 color = vec3(.015, .02, .055) + tint * facet * shimmer * .13 * smoothstep(.012, .05, seam);
+  float trace = exp(-abs(seam - .055) * 160.);
+  float travel = pow(.5 + .5 * sin((p.x + p.y) * 6.28318 - time * 4.), 12.);
+  color += tint * trace * (.08 + travel * .24 + energy * .1);
+  for (int i = 0; i < 4; i++) {
+    float capture = 0.;
+    if (captures[i] >= 0. && captures[i] < 1.6) {
+      float age = captures[i];
+      capture = (1. - age / 1.6) * exp(-abs(uv.y - .85 + age * .5) * 12.);
+    }
+    float beam = exp(-abs(uv.x - (.12 + float(i) * .25) + (1. - uv.y) * .18) * 24.);
+    color += glass(float(i)) * beam * (.08 + capture * .7) * (.4 + .6 * uv.y);
+    if (abs(index - float(i)) < .5) color += tint * capture * (trace * .5 + .09);
+  }
+  gl_FragColor = vec4(color, 1.);
+}
+`;
+
+export const THEME_FRAGMENTS = { liquid: LIQUID_FRAGMENT, neon: NEON_FRAGMENT, paper: PAPER_FRAGMENT, circuit: CIRCUIT_FRAGMENT };
 export function createThemeShader(makeCanvas) {
   const renderer = createMaterialShader(LIQUID_FRAGMENT, makeCanvas);
   if (!renderer) return null;
