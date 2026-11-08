@@ -52,7 +52,7 @@ let offset = +(globalThis.localStorage?.lockstepOffset || 0), offsetAt = -9; // 
 let beats, bars, gridDown;
 let hits = 0, misses = 0, caps = 0, shown = 0, rt = 0, last = performance.now() / 1000, phase = 0, pulse = 0;
 let camX = 0, camTo = 0, bendX = 0, bendY = 0, bendAmp = .6, hue = HUES[0], shake = 0, missAt = -9, flash = null;
-let dash = null;
+let dash = null, entrance = null;
 let parts = [], pops = [], rings = [], press = [-9, -9, -9], laneHit = new Array(12).fill(-9);
 const stars = Array.from({ length: 220 }, () => ({ x: Math.random() * 2 - 1, y: Math.random() * 2 - 1, z: Math.random() }));
 const LIVE = 1, CUE = .35, GHOST = .2; // stem volume: playing well / your track before a hit / other tracks (GHOST high enough to mask separation artifacts)
@@ -94,9 +94,11 @@ const buildTracks = () => song.tracks.map((tr, i) => ({ name: tr.name, kind: tr.
   notes: thin(tr.notes, level).map(([t, lane]) => ({ t, lane, bar: bar(t), hit: false, missed: false })) }));
 
 const stopStems = () => { srcs.forEach(s => s.stop()); srcs = []; };
-function reset() {
+function reset(menuImage = null) {
   setGrid(song); tracks = buildTracks(); cur = Math.max(0, tracks.findIndex(tr => tr.notes.length)); score = 0; mult = 1; mode = 'play'; hits = misses = caps = 0; shown = 0;
   parts = []; pops = []; rings = []; flash = null; dash = null; laneHit.fill(-9);
+  entrance = menuImage ? { image: menuImage, at: performance.now() / 1000 } : null;
+  if (menuImage && reducedMotion?.matches) camX = camTo = trackX(cur);
   t0 = ac.currentTime + LEAD_IN; sched = -LEAD_IN;
   stopStems();
   if (song.buffers) tracks.forEach((tr, i) => { const s = ac.createBufferSource(), v = ac.createGain();
@@ -162,11 +164,13 @@ async function start() {
   clearTimeout(pvTimer); pvN++; stopPreview();
   if (e.find) { mode = 'find'; au.list.length ? preview() : auSearch(); return; }
   if (!ac) initAudio();
+  const menuImage = document.createElement('canvas');
+  menuImage.width = cv.width; menuImage.height = cv.height; menuImage.getContext('2d').drawImage(cv, 0, 0);
   mode = 'loading'; loadErr = ''; playKey = songKey(e);
-  try { song = await loadSong(e); reset(); }
+  try { song = await loadSong(e); reset(menuImage); }
   catch (err) { loadErr = `could not load: ${err.message || err}`; say(loadErr, 'err'); mode = 'title'; showSelected(); }
 }
-function toTitle() { stopStems(); mode = 'title'; showSelected(); }
+function toTitle() { entrance = null; stopStems(); mode = 'title'; showSelected(); }
 
 // The title screen's backdrop is the selected song: its chart scrolls behind the menu and its stems play quietly, looping from ~30 s in.
 let pv = [], pvT0 = 0, pvFrom = 0, pvFor = null, pvTimer, pvN = 0;
@@ -669,6 +673,8 @@ function draw(t, playing) {
   if (rt - offsetAt < 1.5) text(`audio offset ${offset >= 0 ? '+' : ''}${Math.round(offset * 1000)} ms`, W / 2, 545, `700 13px ${MONO}`, '#fff');
   if (!playing) return drawTitle();
 
+  const arrival = entrance ? Math.max(0, rt - entrance.at) : 1;
+  g.globalAlpha = entrance && t < 0 ? Math.max(0, Math.min(1, (arrival - .4) / .35)) : 1;
   text('SCORE', 24, 30, `700 11px ${SANS}`, 'rgba(255,255,255,.55)', 'left');
   text(String(Math.round(shown)).padStart(6, '0'), 24, 62, `700 32px ${MONO}`, '#fff', 'left', 10);
   const mc = mult === 1 ? '#bbb' : `hsl(${210 - mult * 25},100%,65%)`;
@@ -688,6 +694,7 @@ function draw(t, playing) {
     text(capd ? `${tr.name}  AUTO` : tr.notes.length ? tr.name : `${tr.name} · SILENT`, x + 85, y + 17, `800 12px ${SANS}`, me ? '#fff' : tr.notes.length ? tr.color : 'rgba(255,255,255,.3)');
   });
 
+  g.globalAlpha = 1;
   if (!playable(tracks[cur], t) && mode === 'play') { // this track is on autopilot: point at the tracks you can move to
     const a = .55 + .45 * pulse, l = next(-1, t), r = next(1, t);
     if (l >= 0) text(`◀ A  ${tracks[l].name}`, 24, 430, `900 20px ${SANS}`, tracks[l].color, 'left', 16 * a);
@@ -696,6 +703,13 @@ function draw(t, playing) {
   if (t < 0) { const f = -t % 1; text(String(Math.ceil(-t)), W / 2, 330, `italic 900 ${90 + f * 60}px ${SANS}`, `rgba(255,255,255,${f})`, 'center', 30); }
   else if (t < .6) text('GO!', W / 2, 330, `italic 900 ${110 + t * 80}px ${SANS}`, `rgba(255,255,255,${1 - t / .6})`, 'center', 30);
   if (mode === 'over') drawResults();
+  if (entrance) {
+    // Composite the last menu frame, so its many independent alpha values fade together.
+    if (arrival < .4 && t < 0) {
+      g.globalAlpha = 1 - arrival / .4; g.drawImage(entrance.image, 0, 0, W, H); g.globalAlpha = 1;
+    }
+    if (arrival >= .75 || t >= 0) entrance = null;
+  }
 }
 
 // ---------- title screen: grouped song list (left), the selected song (right), toast, keys for this screen ----------
