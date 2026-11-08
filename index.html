@@ -624,11 +624,12 @@ function drawPause() {
   text(fit(song.title, 640, `600 18px ${SANS}`), W / 2, 290, `600 18px ${SANS}`, '#a6b6c8');
   zones = [];
   if (!state.deadline && !state.busy) {
-    [['SPACE / ENTER   Resume', resumeCountdown], ['R   Restart', () => resumeGame('restart')], ['ESC   Song selection', () => resumeGame('menu')]].forEach(([label, fn], i) => {
+    [['SPACE / ENTER', 'Resume', resumeCountdown], ['R', 'Restart', () => resumeGame('restart')], ['ESC', 'Song selection', () => resumeGame('menu')]].forEach(([key, label, fn], i) => {
       const y = 325 + i * 54; box(220, y, 360, 44, 8, 'rgba(255,255,255,.08)', 'rgba(255,255,255,.2)');
-      text(label, W / 2, y + 28, `700 15px ${MONO}`, '#fff'); zone(220, y, 360, 44, fn);
+      shortcut(key, label, W / 2, y + 28); zone(220, y, 360, 44, fn);
     });
-  } else text(state.busy ? 'Resuming audio…' : 'SPACE   cancel countdown', W / 2, 370, `600 14px ${MONO}`, '#a6b6c8');
+  } else if (state.busy) text('Resuming audio…', W / 2, 370, `600 14px ${MONO}`, '#a6b6c8');
+  else shortcut('SPACE', 'cancel countdown', W / 2, 370);
   if (state.deadline && remaining <= 0 && !state.busy) resumeGame();
   drawToast();
 }
@@ -1132,6 +1133,10 @@ function wrap(s, x, y, w, lh, font, color) { let line = '';
   text(line, x, y, font, color, 'left'); }
 function keycap(k, x, y) { const f = `800 10px ${MONO}`, w = Math.max(18, tw(k, f) + 10);
   box(x, y - 12, w, 17, 4, 'rgba(255,255,255,.08)', 'rgba(255,255,255,.35)'); text(k, x + w / 2, y, f, '#fff'); return x + w + 6; }
+function shortcut(k, label, x, y, font = `700 14px ${MONO}`, color = '#fff') {
+  const width = Math.max(18, tw(k, `800 10px ${MONO}`) + 10) + 6 + tw(label, font);
+  text(label, keycap(k, x - width / 2, y), y, font, color, 'left');
+}
 const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 function about(e) { // what the list and card can show without loading the song
   const [name, artist = ''] = e.title.split(' — ');
@@ -1154,7 +1159,7 @@ function drawTitle() {
   const hint = (k, s) => { x = keycap(k, x, y); text(s, x, y, `600 11px ${MONO}`, 'rgba(255,255,255,.6)', 'left'); x += tw(s, `600 11px ${MONO}`) + 18; };
   hint('↑↓', 'song'); if (!e?.add && !e?.find) hint('←→', 'difficulty');
   hint('ENTER', e?.add ? 'pick files' : e?.find ? 'search' : 'play'); if (e?.lib) hint('X', 'delete'); hint('?', 'all controls');
-  text(`[ ] offset ${Math.round(offset * 1000)} ms`, W - 34, y, `600 11px ${MONO}`, 'rgba(255,255,255,.45)', 'right');
+  text(`offset ${Math.round(offset * 1000)} ms`, keycap('[ ]', W - 168, y), y, `600 11px ${MONO}`, 'rgba(255,255,255,.45)', 'left');
 }
 
 const LIST = { x: 32, y: 128, w: 372, h: 350 };
@@ -1264,14 +1269,16 @@ function drawCard() {
   const cta = (label, fn) => { const by = y + h - 66, gr = g.createLinearGradient(L, 0, R, 0);
     gr.addColorStop(0, '#ff4d6d'); gr.addColorStop(1, `hsl(${hue},90%,72%)`);
     g.shadowColor = `hsl(${hue},90%,70%)`; g.shadowBlur = 16 + pulse * 12; box(L, by, R - L, 44, 10, gr); g.shadowBlur = 0;
-    text(label, (L + R) / 2, by + 29, `italic 900 19px ${SANS}`, '#fff'); zone(L, by, R - L, 44, fn); };
+    if (mode === 'loading') text(label, (L + R) / 2, by + 29, `italic 900 19px ${SANS}`, '#fff');
+    else shortcut('ENTER', label, (L + R) / 2, by + 29, `italic 900 19px ${SANS}`);
+    zone(L, by, R - L, 44, fn); };
   if (e.add || e.find) {
     text(e.title, L, y + 46, `900 26px ${SANS}`, '#fff', 'left');
     wrap(e.add ? 'Drop audio files anywhere on this page, or press Enter to pick some. Each song is split into drums, bass, vocals and harmony right here on your device, then charted. Nothing is uploaded.'
       : 'Browse trending tracks or search Audius for free music from independent artists. Previews play as you browse, and Enter adds a track to your library.',
       L, y + 84, R - L, 22, `500 14px ${SANS}`, 'rgba(255,255,255,.72)');
     text(e.add ? 'MP3 · WAV · FLAC · M4A · OGG and more' : 'Audius Open Music License · artists credited', L, y + 262, `600 10px ${MONO}`, 'rgba(255,255,255,.4)', 'left');
-    return cta(e.add ? 'ENTER ▸ PICK FILES' : 'ENTER ▸ SEARCH', start);
+    return cta(e.add ? 'PICK FILES' : 'SEARCH', start);
   }
   const a = about(e), ready = pvFor === e && mode !== 'loading';
   const source = e === DEMO ? demoSleeve : e.song || e.meta || (ready ? song : null);
@@ -1281,16 +1288,19 @@ function drawCard() {
   const bpm = source?.bpm || (e === DEMO ? BPM : null), duration = a.dur || source?.duration;
   const count = ready ? tracks.reduce((n, tr) => n + tr.notes.length, 0) : null;
   text(`${bpm ? Math.round(bpm) : '—'} BPM   /   ${duration ? mmss(duration) : '—'}   /   ${count ?? '—'} NOTES`, L, y + 236, `600 10px ${MONO}`, '#a6b6c8', 'left');
-  box(R - 160, y + 22, 152, 26, 13, 'rgba(3,12,20,.85)', '#627f8f');
-  text(`T · ${theme.name}`, R - 84, y + 40, `700 10px ${SANS}`, '#fff');
-  zone(R - 160, y + 22, 152, 26, () => chooseTheme());
+  // Keep controls outside the signature artwork, using the same keycaps as the menu footer.
+  const toolbarY = y - 38;
+  box(L, toolbarY, 212, 28, 8, 'rgba(3,12,20,.85)', '#627f8f');
+  const themeX = keycap('T', L + 8, toolbarY + 18);
+  text(fit(`Theme: ${theme.name}`, L + 204 - themeX, `700 10px ${SANS}`), themeX, toolbarY + 18, `700 10px ${SANS}`, '#fff', 'left');
+  zone(L, toolbarY, 212, 28, () => chooseTheme());
   if (audiusURL(e.url)) {
-    box(L + 8, y + 22, 96, 26, 13, 'rgba(3,12,20,.85)', '#627f8f');
-    text('C · SHARE', L + 56, y + 40, `700 10px ${SANS}`, '#fff');
-    zone(L + 8, y + 22, 96, 26, () => shareTrack(e));
+    box(R - 76, toolbarY, 76, 28, 8, 'rgba(3,12,20,.85)', '#627f8f');
+    text('Share', keycap('C', R - 68, toolbarY + 18), toolbarY + 18, `700 10px ${SANS}`, '#fff', 'left');
+    zone(R - 76, toolbarY, 76, 28, () => shareTrack(e));
   }
-  const defaultY = y + h + 6;
-  text(`Default: ${THEMES[themeSettings.default].name} · SHIFT T to update`, (L + R) / 2, defaultY + 14, `600 10px ${MONO}`, '#a6b6c8');
+  const defaultY = y + h + 6, defaultX = keycap('SHIFT T', L, defaultY + 14);
+  text(fit(`Set default · ${THEMES[themeSettings.default].name}`, R - defaultX, `600 10px ${MONO}`), defaultX, defaultY + 14, `600 10px ${MONO}`, '#a6b6c8', 'left');
   zone(L, defaultY, R - L, 22, () => chooseTheme(true));
   const dy = y + 252, sw = (R - L) / 3;
   box(L, dy, R - L, 30, 8, null, 'rgba(255,255,255,.22)');
@@ -1300,7 +1310,7 @@ function drawCard() {
   text(`BEST · ${LEVELS[level].name}`, L, dy + 60, `600 11px ${MONO}`, 'rgba(255,255,255,.5)', 'left');
   text(b ? `${b.grade} · ${b.score.toLocaleString()}` : 'not played yet', R, dy + 60, `700 12px ${MONO}`, b ? '#fff' : 'rgba(255,255,255,.4)', 'right');
   text(fit(a.src, R - L, `500 9px ${MONO}`), L, y + 326, `500 9px ${MONO}`, '#8e9bab', 'left');
-  cta(mode === 'loading' ? 'LOADING…' : 'ENTER ▸ PLAY', start);
+  cta(mode === 'loading' ? 'LOADING…' : 'PLAY', start);
 }
 
 function drawToast() {
@@ -1315,11 +1325,11 @@ function drawHelp() {
   text('CONTROLS', W / 2, 84, `italic 900 34px ${SANS}`, '#fff', 'center', 20);
   [['MENU'], ['↑ ↓', 'choose a song'], ['← →', 'difficulty'], ['ENTER', 'play  (or click the song twice)'], ['O', 'add audio files, or drop them anywhere'],
    ['F', 'find a song on Audius'], ['X  X', 'delete a song from your library'], ['[  ]', 'audio offset: raise if notes feel early, lower if late'],
-   ['T / SHIFT T', 'change theme / set current theme as default'],
+   ['T / SHIFT T', 'change theme / set current theme as default'], ['C', 'copy an Audius track link'],
    ['PLAYING'], ['J  K  L', 'hit the left, middle and right lane'], ['A  D', 'switch track, including AUTO (or ← →)'], ['SPACE / ESC', 'pause · resume, restart or return to menu'], ['SPACE', 'play again, on the results screen']]
-    .forEach(([k, s], i) => { const y = 128 + i * 28 + (i > 7 ? 10 : 0);
+    .forEach(([k, s], i) => { const y = 118 + i * 25 + (i > 7 ? 10 : 0);
       if (!s) text(k, 150, y, `800 10px ${MONO}`, `hsl(${hue},90%,78%)`, 'left');
-      else { text(k, 290, y, `800 13px ${MONO}`, '#fff', 'right'); text(s, 312, y, `500 14px ${SANS}`, 'rgba(255,255,255,.75)', 'left'); } });
+      else { keycap(k, 290 - Math.max(18, tw(k, `800 10px ${MONO}`) + 10), y); text(s, 312, y, `500 14px ${SANS}`, 'rgba(255,255,255,.75)', 'left'); } });
   text('press any key to close', W / 2, 540, `700 13px ${SANS}`, 'rgba(255,255,255,.5)');
   zones = [{ x: 0, y: 0, w: W, h: H, fn: () => help = false }];
 }
@@ -1339,7 +1349,7 @@ function drawFind() {
   au.list.slice(top, top + 9).forEach((t, k) => { const on = top + k === au.sel, y = 220 + k * 30;
     text(`${on ? (peek && !peek.paused ? '♪  ' : '▶  ') : ''}${clip(t.title, 38)}`, 110, y, `${on ? 800 : 500} ${on ? 18 : 15}px ${SANS}`, on ? '#fff' : 'rgba(255,255,255,.55)', 'left', on ? 12 : 0);
     text(`${clip(t.user.name, 22)}  ${Math.floor(t.duration / 60)}:${String(t.duration % 60).padStart(2, '0')}`, 690, y, `500 13px ${MONO}`, on ? `hsl(${hue},90%,80%)` : 'rgba(255,255,255,.4)', 'right'); });
-  text('↑ ↓ choose (plays a preview)    ENTER add to your library    ESC back', W / 2, 520, `800 14px ${SANS}`, '#fff');
+  shortcut('↑ ↓', 'choose / preview', 200, 520); shortcut('ENTER', 'add to library', 450, 520); shortcut('ESC', 'back', 650, 520);
   text('Music streamed from audius.co by its artists, under the Audius Open Music License', W / 2, 560, `500 11px ${MONO}`, 'rgba(255,255,255,.45)');
 }
 
@@ -1350,9 +1360,9 @@ function drawFailure() {
   text(`${Math.min(100, Math.floor(failedAt / song.duration * 100))}% COMPLETE · ${score.toLocaleString()} POINTS`, W / 2, 310, `600 15px ${MONO}`, '#a6b6c8');
   text('Hits restore groove. Captures give you a bigger recovery.', W / 2, 355, `500 15px ${SANS}`, '#a6b6c8');
   zones = [];
-  [['SPACE / ENTER   Retry', reset], ['ESC   Song selection', toTitle]].forEach(([label, action], i) => {
+  [['SPACE / ENTER', 'Retry', reset], ['ESC', 'Song selection', toTitle]].forEach(([key, label, action], i) => {
     const y = 395 + i * 54; box(220, y, 360, 44, 8, 'rgba(255,255,255,.08)', 'rgba(255,255,255,.2)');
-    text(label, W / 2, y + 28, `700 15px ${MONO}`, '#fff'); zone(220, y, 360, 44, () => action());
+    shortcut(key, label, W / 2, y + 28); zone(220, y, 360, 44, () => action());
   });
 }
 
@@ -1387,7 +1397,7 @@ function drawResults() {
     text(String(tr.caps), 736, y, `600 12px ${MONO}`, '#fff', 'right');
   });
   text('Manual hits and misses only · AUTO notes excluded', 48, 512, `500 10px ${MONO}`, '#a6b6c8', 'left');
-  text('SPACE  play again       ESC  song selection', W / 2, 558, `800 14px ${MONO}`, '#fff');
+  shortcut('SPACE', 'play again', 260, 558); shortcut('ESC', 'song selection', 540, 558);
 }
 
 setGrid(song); tracks = buildTracks(); rebuild(); applyTheme(catalog[sel]);

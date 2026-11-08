@@ -109,9 +109,16 @@ vm.runInContext(`
   sel = 0; zones = []; drawCard();
   assert.equal(zones.length, 6, 'theme, default, three difficulty controls and play');
   for (const z of zones) {
-    assert.ok(z.x >= CARD.x && z.y >= CARD.y && z.x + z.w <= CARD.x + CARD.w && z.y + z.h <= CARD.y + CARD.h + 28);
+    assert.ok(z.x >= CARD.x && z.y >= CARD.y - 38 && z.x + z.w <= CARD.x + CARD.w && z.y + z.h <= CARD.y + CARD.h + 28);
   }
   zones[2].fn(); assert.equal(level, 0); setLevel(1);
+  const artwork = { x: CARD.x + 22, y: CARD.y + 14, w: CARD.w - 44, h: 140 };
+  catalog = [{ title: 'Shared track', url: 'https://audius.co/artist/song', lib: 'shared', meta: { duration: 120, tracks: [] } }];
+  zones = []; drawCard();
+  assert.equal(zones.length, 7, 'Audius adds a share control');
+  for (const z of zones) assert.ok(z.x + z.w <= artwork.x || z.x >= artwork.x + artwork.w || z.y + z.h <= artwork.y || z.y >= artwork.y + artwork.h, 'controls never cover signature artwork');
+  assert.ok(zones[0].y + zones[0].h < CARD.y && zones[1].y + zones[1].h < CARD.y, 'theme and share occupy the separate toolbar');
+
   catalog = [{ title: 'A very long title that should fit in the selected song card — Artist', meta: sleeve, lib: 'test' }];
   sel = 0; pvFor = null; mode = 'loading'; zones = []; drawCard();
   catalog = [{ title: 'Unloaded song', slug: 'pending' }]; drawCard();
