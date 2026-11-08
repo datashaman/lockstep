@@ -153,3 +153,21 @@ vm.runInContext('camX = 100; reset({}); assert.equal(camX, trackX(cur)); rt = .1
 assert.equal(scoreOpacity.at(-1), 1, 'first notes always have full HUD');
 vm.runInContext('reset({}); reset(); assert.equal(entrance, null)', context);
 console.log('ok: entrance fade, HUD sequence, unchanged audio scheduling, reduced-motion camera, first-note clearance, replay');
+
+vm.runInContext(`
+  song = demoSong(); setGrid(song); tracks = buildTracks(); cur = 0;
+  ac = { currentTime: 1 }; t0 = 0; rt = 30;
+  tracks[1].capFrom = 0; tracks[1].capTo = 8;
+  move(1); assert.equal(cur, 1, 'can enter an auto track');
+  const beforeScore = score, beforeHits = hits;
+  const autoNote = tracks[1].notes[0]; ac.currentTime = autoNote.t;
+  tryHit(autoNote.lane); assert.equal(score, beforeScore); assert.equal(hits, beforeHits);
+  assert.equal(tracks[1].capTo, 8, 'entering leaves capture intact');
+  move(1); assert.equal(cur, 2, 'can leave an auto track');
+  move(-1); assert.equal(cur, 1, 'can return to an auto track');
+  tracks[2].notes = []; move(1); assert.equal(cur, 3, 'still skips silent tracks');
+  move(1); assert.equal(cur, 3, 'does not wrap at boundary');
+  tracks.forEach(tr => { tr.capFrom = 0; tr.capTo = 8; });
+  move(-1); assert.equal(cur, 1, 'can move when every populated track is auto');
+`, context);
+console.log('ok: auto-track entry, exit and re-entry, capture intact, silent tracks and boundaries');

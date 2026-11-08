@@ -40,6 +40,8 @@ The first song you add downloads the ~180 MB separation model once.
 | J K L | | hit lanes |
 | Esc | | back to title |
 
+You can move onto captured (AUTO) tracks and back out again; silent tracks are skipped.
+
 The title screen also works with the mouse: click a song to select it and again to play, or click the buttons.
 Your best grade and score for each song and difficulty are kept in this browser.
 

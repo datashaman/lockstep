@@ -338,11 +338,11 @@ function burst(x, y, color, n, power, spread = 0) {
 const popup = (text, x, y, color, size, life = .7) => pops.push({ text, x, y, color, size, life, born: rt });
 
 // ---------- gameplay ----------
-// Switching is always the player's call: A/D goes to the nearest playable track that way (no wrap-around), or nowhere.
+// Switching is always the player's call: A/D goes to the nearest non-silent track that way, including auto tracks (no wrap-around), or nowhere.
 const playable = (tr, t) => tr.notes.length && !locked(tr, t);
-function next(dir, t) { for (let j = cur + dir; j >= 0 && j < tracks.length; j += dir) if (playable(tracks[j], t)) return j; return -1; }
+function next(dir) { for (let j = cur + dir; j >= 0 && j < tracks.length; j += dir) if (tracks[j].notes.length) return j; return -1; }
 function move(dir) {
-  const j = next(dir, now()); if (j < 0) return;
+  const j = next(dir); if (j < 0) return;
   dash = { from: craftX(), to: trackX(j), at: rt };
   hiss(ac.currentTime, .12, .06, 3000); tracks[cur].live = false; cur = j;
 }
@@ -647,7 +647,7 @@ function draw(t, playing) {
   });
 
   if (playing && locked(tracks[cur], t) && !reducedMotion?.matches) {
-    const age = rt - tracks[cur].capAt, right = next(1, t), target = right >= 0 ? right : next(-1, t);
+    const age = rt - tracks[cur].capAt, right = next(1), target = right >= 0 ? right : next(-1);
     if (target >= 0 && age >= .65 && age < 1.35) {
       const q = (age - .65) / .7, from = sx(trackX(cur)), to = sx(trackX(target)), x = from + (to - from) * (1 - (1 - q) ** 3);
       g.globalAlpha = Math.sin(q * Math.PI) * .8; g.strokeStyle = tracks[target].color; g.lineWidth = 3;
@@ -696,7 +696,7 @@ function draw(t, playing) {
 
   g.globalAlpha = 1;
   if (!playable(tracks[cur], t) && mode === 'play') { // this track is on autopilot: point at the tracks you can move to
-    const a = .55 + .45 * pulse, l = next(-1, t), r = next(1, t);
+    const a = .55 + .45 * pulse, l = next(-1), r = next(1);
     if (l >= 0) text(`◀ A  ${tracks[l].name}`, 24, 430, `900 20px ${SANS}`, tracks[l].color, 'left', 16 * a);
     if (r >= 0) text(`${tracks[r].name}  D ▶`, W - 24, 430, `900 20px ${SANS}`, tracks[r].color, 'right', 16 * a);
   }
@@ -876,7 +876,7 @@ function drawHelp() {
   text('CONTROLS', W / 2, 84, `italic 900 34px ${SANS}`, '#fff', 'center', 20);
   [['MENU'], ['↑ ↓', 'choose a song'], ['← →', 'difficulty'], ['ENTER', 'play  (or click the song twice)'], ['O', 'add audio files, or drop them anywhere'],
    ['F', 'find a song on Audius'], ['X  X', 'delete a song from your library'], ['[  ]', 'audio offset: raise if notes feel early, lower if late'],
-   ['PLAYING'], ['J  K  L', 'hit the left, middle and right lane'], ['A  D', 'move to the next playable track (or ← →)'], ['ESC', 'back to the menu'], ['SPACE', 'play again, on the results screen']]
+   ['PLAYING'], ['J  K  L', 'hit the left, middle and right lane'], ['A  D', 'switch track, including AUTO (or ← →)'], ['ESC', 'back to the menu'], ['SPACE', 'play again, on the results screen']]
     .forEach(([k, s], i) => { const y = 128 + i * 28 + (i > 7 ? 10 : 0);
       if (!s) text(k, 150, y, `800 10px ${MONO}`, `hsl(${hue},90%,78%)`, 'left');
       else { text(k, 290, y, `800 13px ${MONO}`, '#fff', 'right'); text(s, 312, y, `500 14px ${SANS}`, 'rgba(255,255,255,.75)', 'left'); } });
