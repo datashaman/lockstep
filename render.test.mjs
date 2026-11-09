@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { appSource, appImports } from './test/app-harness.mjs';
 import vm from 'node:vm';
 
 // Exercise the real renderer without audio, network, or a browser animation loop.
@@ -18,7 +18,7 @@ for (const name of ['createLinearGradient', 'createRadialGradient']) canvas[name
 canvas.measureText = text => ({ width: text.length * 7 });
 const motion = { matches: false };
 const events = {};
-const context = vm.createContext({
+const context = vm.createContext({ ...appImports,
   console: { ...console, assert: (value, ...message) => assert.ok(value, message.join(' ')) },
   document: { addEventListener: (name, fn) => events[name] = fn, getElementById: () => ({ getContext: () => canvas, addEventListener() {} }) },
   performance: { now: () => 0 }, matchMedia: () => motion,
@@ -26,9 +26,9 @@ const context = vm.createContext({
   fetch: () => Promise.reject(new Error('offline test')),
   assert, URL,
 });
-const source = readFileSync(new URL('./index.html', import.meta.url), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const source = appSource;
 // Allow the import tests to replace the IndexedDB boundary without a browser database.
-vm.runInContext(source.replace('const idb =', 'let idb =').replace('const saveSong =', 'let saveSong ='), context);
+vm.runInContext(source, context);
 vm.runInContext(`
   for (const vertical of [-81, -50, 0, 50, 81]) {
     bendY = vertical; bendX = 170; camX = 291;
@@ -443,7 +443,7 @@ calls = [];
 vm.runInContext('drawLiquidWorld(4, false, 400, 190)', context);
 assert.deepEqual(calls, stillWater, 'reduced-motion water is static');
 for (const stored of ['{invalid', 'null', JSON.stringify({ default: 'unknown', songs: { demo: 'unknown' } }), JSON.stringify({ default: 'neon', songs: { demo: 'liquid' } })]) {
-  const fresh = vm.createContext({ ...context, localStorage: { lockstepThemes: stored } });
+  const fresh = vm.createContext({ ...appImports, ...context, localStorage: { lockstepThemes: stored } });
   vm.runInContext(source, fresh);
   assert.equal(vm.runInContext('theme.name', fresh), stored.includes('liquid') ? 'Liquid Dream' : 'Neon');
 }
@@ -463,7 +463,7 @@ vm.runInContext(`
   }
 `, context);
 for (const key of ['paper', 'circuit']) {
-  const fresh = vm.createContext({ ...context, localStorage: { lockstepThemes: JSON.stringify({ default: key }) } });
+  const fresh = vm.createContext({ ...appImports, ...context, localStorage: { lockstepThemes: JSON.stringify({ default: key }) } });
   vm.runInContext(source, fresh);
   assert.equal(vm.runInContext('theme.name', fresh), key === 'paper' ? 'Paper City' : 'Circuit Cathedral');
   calls = [];
@@ -504,7 +504,7 @@ await vm.runInContext(`(async () => {
   OfflineAudioContext = class { async decodeAudioData() { return { duration: 120, numberOfChannels: 1, getChannelData: () => new Float32Array(4) }; } };
   navigator = { storage: {} };
   const writes = [];
-  saveSong = async (...args) => writes.push(args);
+  songLibrary.save = async (...args) => writes.push(args);
   importDuration = async () => {};
   work = async () => ({ song: { bpm: 120, tracks: [] }, pcm: [] });
   library = []; jobs = []; job = null;

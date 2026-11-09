@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { appSource, appImports } from './test/app-harness.mjs';
 import vm from 'node:vm';
 
 let surfaces = 0, builds = 0, blits = 0, depth = 0;
@@ -19,7 +19,7 @@ function drawing(offscreen = false) {
   });
 }
 const g = drawing(), motion = { matches: false };
-const context = vm.createContext({ assert, console, URL, performance: { now: () => 0 },
+const context = vm.createContext({ ...appImports, assert, console, URL, performance: { now: () => 0 },
   document: {
     getElementById: () => ({ getContext: () => g, addEventListener() {} }), addEventListener() {},
     createElement: tag => {
@@ -30,7 +30,7 @@ const context = vm.createContext({ assert, console, URL, performance: { now: () 
   addEventListener() {}, requestAnimationFrame() {}, matchMedia: () => motion,
   fetch: () => Promise.reject(new Error('offline')),
 });
-const source = readFileSync(new URL('./index.html', import.meta.url), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const source = appSource;
 vm.runInContext(source, context);
 vm.runInContext(`
   for (const style of Object.values(THEMES)) {

@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { appSource, appImports } from './test/app-harness.mjs';
 import vm from 'node:vm';
 const gradient = { addColorStop() {} };
 const canvas = new Proxy({}, { get: (o, k) => o[k] ?? (k === 'measureText' ? s => ({ width: s.length * 7 }) : k.startsWith('create') ? () => gradient : () => {}), set: (o, k, v) => (o[k] = v, true) });
 const handlers = {};
-const context = vm.createContext({ assert, console, URL,
+const context = vm.createContext({ ...appImports, assert, console, URL,
   document: { getElementById: () => ({ getContext: () => canvas, addEventListener() {} }), addEventListener() {} },
   addEventListener: (name, fn) => handlers[name] = fn, requestAnimationFrame() {}, performance: { now: () => 0 },
   fetch: () => Promise.reject(new Error('offline')), clearTimeout() {}, setTimeout() {},
 });
-const source = readFileSync(new URL('./index.html', import.meta.url), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const source = appSource;
 vm.runInContext(source, context);
 function button(key) {
   const events = {}, classes = new Set();

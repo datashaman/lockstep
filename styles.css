@@ -1,0 +1,197 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #030206;
+  overflow: hidden;
+}
+body {
+  display: grid;
+  place-items: center;
+}
+canvas {
+  width: min(100vw, 133.33vh);
+  height: min(75vw, 100vh);
+}
+dialog {
+  color: #fff;
+  background: #140c22;
+  border: 1px solid #627f8f;
+  border-radius: 18px;
+  padding: 28px;
+  width: min(420px, 80vw);
+  font: 16px system-ui;
+}
+dialog::backdrop {
+  background: #030206dd;
+}
+dialog h2 {
+  margin-top: 0;
+}
+dialog p {
+  line-height: 1.5;
+}
+dialog button {
+  font: 700 14px system-ui;
+  padding: 12px 18px;
+  border-radius: 8px;
+  border: 0;
+  margin: 8px 8px 0 0;
+  cursor: pointer;
+}
+dialog button:focus-visible {
+  outline: 3px solid #4cc9f0;
+}
+dialog input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px;
+}
+
+#touch-controls,
+#rotate-hint {
+  display: none;
+}
+html.touch {
+  --dock: 120px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+html.touch body {
+  height: 100dvh;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    calc(var(--dock) + var(--safe-bottom)) env(safe-area-inset-left, 0px);
+  box-sizing: border-box;
+}
+html.touch canvas {
+  width: min(
+    100%,
+    calc(
+      (
+          100dvh - var(--dock) - var(--safe-bottom) -
+            env(safe-area-inset-top, 0px)
+        ) *
+        4 / 3
+    )
+  );
+  height: auto;
+  aspect-ratio: 4/3;
+  touch-action: manipulation;
+}
+html.touch #touch-controls {
+  display: block;
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100%, 1100px);
+  height: calc(var(--dock) + var(--safe-bottom));
+  box-sizing: border-box;
+  padding: 8px max(8px, env(safe-area-inset-right, 0px))
+    calc(8px + var(--safe-bottom)) max(8px, env(safe-area-inset-left, 0px));
+  background: #090e19;
+  border-top: 1px solid #405269;
+  color: #fff;
+  font: 14px system-ui;
+}
+#touch-controls [hidden] {
+  display: none !important;
+}
+.touch-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+  align-items: stretch;
+}
+#touch-controls button,
+#touch-controls select,
+#touch-controls input {
+  box-sizing: border-box;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid #526980;
+  border-radius: 8px;
+  background: #172335;
+  color: #fff;
+  padding: 8px;
+  font: 600 14px system-ui;
+  touch-action: manipulation;
+}
+#touch-controls select,
+#touch-controls input {
+  font-size: 16px;
+}
+#touch-controls button {
+  flex: 1;
+  cursor: pointer;
+}
+#touch-controls select,
+#touch-controls input {
+  flex: 1;
+  width: 0;
+}
+#touch-controls button:focus-visible,
+#touch-controls select:focus-visible,
+#touch-controls input:focus-visible {
+  outline: 3px solid #4cc9f0;
+  outline-offset: 1px;
+}
+#touch-controls button:disabled {
+  opacity: 0.4;
+}
+#touch-controls .primary {
+  background: #d5efff;
+  color: #091422;
+}
+#touch-controls .play-pads {
+  height: 96px;
+  margin: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#touch-controls .play-pads button {
+  touch-action: none;
+}
+#touch-controls .play-pads .hit {
+  flex: 1.5;
+  border-bottom: 5px solid var(--track-color, #4cc9f0);
+}
+#touch-controls button.pressed {
+  background: #c7eaff;
+  color: #07121b;
+}
+#touch-settings {
+  position: absolute;
+  bottom: calc(var(--dock) + var(--safe-bottom));
+  left: 8px;
+  right: 8px;
+  padding: 12px;
+  border: 1px solid #526980;
+  border-radius: 12px;
+  background: #10192a;
+  box-shadow: 0 -8px 30px #0009;
+}
+#touch-settings p {
+  margin: 0 0 8px;
+}
+#touch-settings .touch-row:last-child {
+  margin: 0;
+}
+#touch-status {
+  margin: 4px 0;
+  text-align: center;
+  color: #b0c3d8;
+}
+@media (orientation: portrait) {
+  html.touch #rotate-hint {
+    display: block;
+    position: fixed;
+    top: max(8px, env(safe-area-inset-top, 0px));
+    left: 12px;
+    right: 12px;
+    text-align: center;
+    color: #c4d9eb;
+    font: 14px system-ui;
+    pointer-events: none;
+  }
+}
