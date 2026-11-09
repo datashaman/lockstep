@@ -16,7 +16,7 @@ Imports remain available on iPhone/iPad and other devices. Files must be 1 secon
 No file handy? Pick **Find a song on Audius** on the title screen to browse trending tracks or type to search
 [Audius](https://audius.co), then press Enter to add one. Tracks stream straight from Audius and are used under the
 [Audius Open Music License](https://openaudiofoundation.org/open-music-license.pdf); each one keeps its artist's
-name and a link back to the track. Only tracks between 30 seconds and 10 minutes are listed or imported.
+name and a link back to the track. Only tracks between 1 second and 10 minutes are listed or imported.
 
 ## Run
 

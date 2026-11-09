@@ -58,3 +58,14 @@ assert.equal(audiusURL("https://audius.co.evil/a/b"), null);
 console.log(
   "ok: stable catalog selection, invalid selection, latest-only search results and stream filtering",
 );
+
+for (const duration of [1, 29, 30, 600, 0, .99, 600.01, Infinity, NaN, "30", null]) {
+  const candidate = { ...track, duration };
+  const client = createAudiusClient(async () => ({
+    ok: true, json: async () => ({ data: [candidate] }),
+  }));
+  const valid = typeof duration === 'number' && Number.isFinite(duration) && duration >= 1 && duration <= 600;
+  assert.deepEqual(await client.search('test'), valid ? [candidate] : []);
+  if (valid) assert.deepEqual(await client.resolve('https://audius.co/artist/song'), candidate);
+  else await assert.rejects(client.resolve('https://audius.co/artist/song'), /1 second and 10 minutes/);
+}
