@@ -34,8 +34,8 @@ await new Promise(setImmediate); tx.commit(); await update;
 assert.equal(records.songs.size, 0, 'a late chart update cannot recreate a deleted song');
 console.log('ok: library mutations wait for commit, save/delete both records atomically, abort preserves data');
 
-checkImportSize(64 * 1024 * 1024); checkImportDuration(600);
-for (const duration of [Infinity, 601, 0]) assert.throws(() => checkImportDuration(duration));
+checkImportSize(64 * 1024 * 1024); checkImportDuration(600); checkImportDuration(1);
+for (const duration of [Infinity, NaN, 601, 0, .99, "30", null]) assert.throws(() => checkImportDuration(duration));
 assert.throws(() => checkImportSize(64 * 1024 * 1024 + 1));
 let cancelled = false;
 const response = { ok:true, headers: { get:()=>null }, body: { getReader:()=>({ read:async()=>({value:{byteLength:64*1024*1024+1}}), cancel:async()=>cancelled=true, releaseLock(){} }) } };
