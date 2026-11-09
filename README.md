@@ -110,7 +110,7 @@ Circuit Cathedral adds stained-glass facets, dark leading, travelling etched-cir
 
 Landscape tablets get a touch dock below the game, keeping fingers away from the timing line. Left / Middle / Right hit the three lanes immediately on touch-down and accept simultaneous touches. Separate Track arrows switch instruments; Pause opens resume, restart and song-selection controls. Rotating into portrait while playing pauses the game.
 
-The dock also offers native song and difficulty selectors, Audius search, file import, theme switching and Audius sharing. Settings contains audio calibration (−10 ms / +10 ms steps), default theme and the existing two-step song deletion. Keyboard controls remain available. Touch controls appear on devices advertising a coarse pointer; buttons have at least 44-pixel targets and the layout accounts for screen safe areas.
+The dock also offers native song and difficulty selectors, Audius search, file import, theme switching and Audius sharing. Settings contains audio calibration (−10 ms / +10 ms steps, limited to ±500 ms), default theme and the existing two-step song deletion. Keyboard controls remain available. Touch controls appear on devices advertising a coarse pointer; buttons have at least 44-pixel targets and the layout accounts for screen safe areas.
 
 This is the landscape-tablet pass. Phone menus retain the scaled two-panel canvas; portrait shows landscape guidance. Real-device touch/audio latency and mobile stem-separation limits still need testing. Keep the browser foregrounded while importing a track.
 

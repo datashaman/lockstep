@@ -204,7 +204,11 @@ let ac,
 let mode = "title";
 let loadErr = "";
 let level = +(globalThis.localStorage?.lockstepLevel ?? 1);
-let offset = +(globalThis.localStorage?.lockstepOffset || 0),
+/** @param {number} value */
+function clampOffset(value) {
+  return Number.isFinite(value) ? Math.max(-0.5, Math.min(0.5, value)) : 0;
+}
+let offset = clampOffset(+(globalThis.localStorage?.lockstepOffset || 0)),
   offsetAt = -9; // player's audio calibration, seconds
 let beats, bars, gridDown;
 let shown = 0,
@@ -962,7 +966,9 @@ function tryHit(lane) {
 function dispatchAction(action) {
   switch (action.type) {
     case "calibrate":
-      offset = Math.round((offset + action.delta * 0.01) * 100) / 100;
+      offset = clampOffset(
+        Math.round((offset + action.delta * 0.01) * 100) / 100,
+      );
       offsetAt = rt;
       if (globalThis.localStorage) localStorage.lockstepOffset = offset;
       break;

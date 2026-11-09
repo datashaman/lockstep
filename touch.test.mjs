@@ -7,10 +7,18 @@ const handlers = {};
 const context = vm.createContext({ ...appImports, assert, console, URL,
   document: { getElementById: () => ({ getContext: () => canvas, addEventListener() {} }), addEventListener() {} },
   addEventListener: (name, fn) => handlers[name] = fn, requestAnimationFrame() {}, performance: { now: () => 0 },
+  localStorage: { lockstepOffset: '999' },
   fetch: () => Promise.reject(new Error('offline')), clearTimeout() {}, setTimeout() {},
 });
 const source = appSource;
 vm.runInContext(source, context);
+vm.runInContext("assert.equal(offset, .5, 'saved offsets are clamped on load')", context);
+for (const [saved, expected] of [['-999', -.5], ['garbage', 0], ['Infinity', 0], ['0.12', .12]]) {
+  context.localStorage.lockstepOffset = saved;
+  const reload = vm.createContext({ ...context });
+  vm.runInContext(source, reload);
+  assert.equal(vm.runInContext('offset', reload), expected);
+}
 function button(key) {
   const events = {}, classes = new Set();
   const b = { dataset: { pad: key }, addEventListener: (name, fn) => events[name] = fn, setPointerCapture() {}, classList: { add: c => classes.add(c), remove: c => classes.delete(c) } };
@@ -44,6 +52,11 @@ for (const pad of pads) assert.equal(pad.classes.size, 0);
 vm.runInContext(`
   offset = 0; handleKey({ key: ']' }); assert.equal(offset, .01, 'touch calibration works while paused');
   handleKey({ key: '[' }); assert.equal(offset, 0);
+  for (let i = 0; i < 100; i++) handleKey({ key: ']' });
+  assert.equal(offset, .5); assert.equal(localStorage.lockstepOffset, .5);
+  for (let i = 0; i < 200; i++) handleKey({ key: '[' });
+  assert.equal(offset, -.5); assert.equal(localStorage.lockstepOffset, -.5);
+  handleKey({ key: ']' }); assert.equal(offset, -.49, 'can leave the limit');
   mode = 'find'; au.q = 'song';
   handleKey({ key: 'x', target: { closest: () => true } }); assert.equal(au.q, 'song', 'native search owns text input');
   mode = 'title'; catalog = [DEMO, ADD]; sel = 0; delArm = rt;
