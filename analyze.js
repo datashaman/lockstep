@@ -20,6 +20,7 @@ export const STEMS = [
   ["other", "HARMONY", [80, 2000]],
 ];
 
+/** @param {{left:Float32Array,right:Float32Array}} channels */
 const mono22 = ({ left, right }) => {
   // stereo 44.1k -> mono 22.05k (pair average is a good-enough anti-alias for analysis)
   const n = left.length >> 1,
@@ -29,6 +30,7 @@ const mono22 = ({ left, right }) => {
       (left[2 * i] + left[2 * i + 1] + right[2 * i] + right[2 * i + 1]) / 4;
   return y;
 };
+/** @param {ArrayLike<number>} arr @param {number} p */
 const pct = (arr, p) => {
   const s = Float32Array.from(arr).sort(),
     x = ((s.length - 1) * p) / 100,
@@ -37,9 +39,11 @@ const pct = (arr, p) => {
     ? s[i] + (s[Math.min(i + 1, s.length - 1)] - s[i]) * (x - i)
     : 0;
 };
+/** @param {number} f */
 const mel = (f) => 2595 * Math.log10(1 + f / 700);
 
 // One pass of centred STFT frames -> per-frame onset strength (log-mel flux), loudness and three drum bands.
+/** @param {Float32Array} y */
 export function features(y) {
   const frames = Math.floor(y.length / HOP) + 1,
     win = new Float32Array(NFFT),
@@ -102,6 +106,7 @@ export function features(y) {
 }
 
 // librosa.util.peak_pick with onset_detect's defaults, on a 0..1 normalised envelope.
+/** @param {Float32Array} env */
 export function peaks(env) {
   let mn = Infinity,
     mx = -Infinity;
@@ -143,6 +148,7 @@ export function peaks(env) {
   }
   return out;
 }
+/** @param {Float32Array} env @param {number} n */
 const peakTime = (env, n) => {
   // parabolic interpolation around a peak frame, in seconds
   const a = env[n - 1] ?? env[n],
@@ -151,6 +157,7 @@ const peakTime = (env, n) => {
     d = a - 2 * b + c;
   return (n + (d ? (0.5 * (a - c)) / d : 0)) / FPS;
 };
+/** @param {Float32Array} env @param {number} t */
 const at = (env, t) => {
   const x = t * FPS,
     i = Math.floor(x);
@@ -162,6 +169,7 @@ const at = (env, t) => {
 // Steady-tempo grid: autocorrelation picks the tempo (log-normal prior around 120 BPM, like librosa),
 // then a fine search over period and phase maximises onset strength on the beats.
 // ponytail: assumes one steady tempo; songs that drift or change tempo need a dynamic-programming beat tracker.
+/** @param {Float32Array} env @param {number} duration */
 export function grid(env, duration, forcedBpm = 0) {
   let mean = 0;
   for (const v of env) mean += v;
@@ -208,6 +216,7 @@ export function grid(env, duration, forcedBpm = 0) {
 }
 
 // Shift the grid onto the drum stem's attacks: median offset of drum onsets from the nearest 16th.
+/** @param {number[]} beats @param {Float32Array} drumEnv */
 function align(beats, drumEnv) {
   const p16 = (beats[1] - beats[0]) / 4,
     res = [];
@@ -221,6 +230,7 @@ function align(beats, drumEnv) {
 }
 
 // YIN f0 (Hz) of a 2048-sample window starting at sample i, or 0 if unvoiced/out of range.
+/** @param {Float32Array} y @param {number} i @param {number} fmin @param {number} fmax */
 function yin(y, i, fmin, fmax) {
   const W = 1024,
     tmax = Math.min(W, Math.floor(SR / fmin)),
@@ -256,11 +266,13 @@ function yin(y, i, fmin, fmax) {
 // A note counts only if its stem is audible at that moment: loud for this stem (vs its own peaks) AND within -20 dB
 // of the whole mix. Demucs always returns all four stems, so an instrumental's "vocals" is faint bleed with real onsets.
 const AUDIBLE = 0.1;
-/** @returns {import("./lib/song").Note[]} */
+/** @returns {import("./lib/song").Note[]}
+ * @param {Float32Array} y @param {ReturnType<typeof features>} ft @param {Float32Array} mixRms @param {number[]} beats @param {number[]} bars @param {[number,number] | null} pitch @param {number} density */
 function chart(y, ft, mixRms, beats, bars, pitch, density) {
   const { env, rms } = ft,
     gate = 0.1 * pct(rms, 95),
     L = Math.round(LEAD * FPS);
+  /** @param {Float32Array} r @param {number} n */
   const loud = (r, n) => {
     let m = 0;
     for (let i = n; i <= Math.min(n + L + 4, r.length - 1); i++)
@@ -272,12 +284,14 @@ function chart(y, ft, mixRms, beats, bars, pitch, density) {
     return v > gate && v > AUDIBLE * loud(mixRms, n);
   }); // the note that just started, not the gap before it
   if (!on.length) return [];
+  /** @type {number[]} */
   const g16 = [];
   for (let k = 0; k + 1 < beats.length; k++)
     for (let q = 0; q < 4; q++)
       g16.push(beats[k] + ((beats[k + 1] - beats[k]) * q) / 4);
-  const best = new Map(),
-    per = 4 / density;
+  /** @type {Map<number,[number,number]>} */
+  const best = new Map();
+  const per = 4 / density;
   for (const n of on) {
     const t = n / FPS + LEAD;
     let lo = 0,
@@ -297,7 +311,9 @@ function chart(y, ft, mixRms, beats, bars, pitch, density) {
   const fr = picks.map(([, n]) => Math.min(n + L + 4, ft.frames - 1)); // read features ~46 ms after the attack (as prep.py)
   let lanes;
   if (!pitch) {
-    const p90 = ["low", "mid", "high"].map((k) => pct(ft[k], 90) + 1e-9);
+    const p90 = /** @type {const} */ (["low", "mid", "high"]).map(
+      (k) => pct(ft[k], 90) + 1e-9,
+    );
     lanes = fr.map((f) => {
       const v = [ft.low[f] / p90[0], ft.mid[f] / p90[1], ft.high[f] / p90[2]];
       return v.indexOf(Math.max(...v));
@@ -341,8 +357,10 @@ export function analyze(
     throw new Error("Density must be 1, 2 or 4.");
   if (bpm !== undefined && (!Number.isFinite(bpm) || bpm < 20 || bpm > 400))
     throw new Error("BPM must be between 20 and 400.");
-  const ys = {},
-    ft = {};
+  /** @type {Record<string,Float32Array>} */
+  const ys = {};
+  /** @type {Record<string,ReturnType<typeof features>>} */
+  const ft = {};
   STEMS.forEach(([s], i) => {
     ys[s] = mono22(stems[s]);
     ft[s] = features(ys[s]);
@@ -357,7 +375,7 @@ export function analyze(
   onProgress(5 / 6);
   // downbeat = the bar phase (0-3) whose beats carry the most kick energy; flux peaks lead the beat like onsets do
   const lf = ft.drums.lowFlux,
-    kick = (b) => {
+    kick = (/** @type {number} */ b) => {
       const c = Math.round((b - LEAD) * FPS);
       let m = 0;
       for (let i = Math.max(0, c - 2); i <= Math.min(lf.length - 1, c + 2); i++)

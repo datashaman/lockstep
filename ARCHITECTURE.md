@@ -14,6 +14,7 @@ Lockstep is still a static site. `index.html` loads `app.js` as a native JavaScr
 | Beat positions and difficulty thinning | `lib/beat-grid.js` | `timing.test.mjs`, `performance.test.mjs` |
 | Stored chart, PCM and tempo data types | `lib/song.ts` | `npm run typecheck` |
 | Native controls and page layout | `index.html`, `styles.css` | `touch.test.mjs` |
+| Audio suspension, resume and countdown state | `lib/pause-session.js` | `pause-session.test.mjs`, `render.test.mjs` |
 | Playback coordination and screen composition | `app.js` | renderer, touch, materials and performance tests |
 | Stem separation and worker messages | `separator.js`, `vendor/demucs-web/processor.js` | separation and audit tests |
 | Automatic note chart generation | `analyze.js` | `analyze.test.mjs` |
@@ -28,8 +29,8 @@ Lockstep is still a static site. `index.html` loads `app.js` as a native JavaScr
 
 - The library module owns IndexedDB. Callers ask it to list, load audio, save, update a chart or remove a song; they do not name object stores or manage transactions. Both audio and metadata commit together. Updating a chart never recreates a deleted entry.
 - Import helpers own validation and metadata/download resources. They report errors to the caller; they do not change the selected song or show toasts.
-- The audio engine owns its master/echo graph and transient synthesized sounds. The app owns the AudioContext, pause/resume, and absolute scheduling times. Sound methods take times in audio-clock seconds; `stopSounds()` disconnects temporary graphs but preserves the reusable master graph. The stem players connect to `audio.output`.
-- Each stem player owns one group of recorded sources and gains. Gameplay and preview use separate players. Starting a group replaces the previous group; stopping or natural completion releases nodes. The app supplies loop bounds and scheduling times, and still owns pause/resume of the shared context.
+- The audio engine owns its master/echo graph and transient synthesized sounds. The app owns the AudioContext and absolute scheduling times; `lib/pause-session.js` owns each pause’s asynchronous suspend/resume and countdown state. Sound methods take times in audio-clock seconds; `stopSounds()` disconnects temporary graphs but preserves the reusable master graph. The stem players connect to `audio.output`.
+- Each stem player owns one group of recorded sources and gains. Gameplay and preview use separate players. Starting a group replaces the previous group; stopping or natural completion releases nodes. The app supplies loop bounds and scheduling times, and starts pause sessions for the shared context.
 - Timing modules are pure calculations. They receive the beat grid or tempo segments explicitly and never read an audio context, DOM node or global game state. Time is measured in seconds.
 - The renderer reads a frame snapshot and owns only drawing resources. Animation state advances in the app; scoring and track mutations belong to gameplay rules. Menu/results overlays are composition callbacks.
 - Input adapters translate browser events into actions before dispatch. Song-menu state preserves selection across catalog rebuilds; Audius search discards stale responses.
@@ -48,7 +49,7 @@ python3 prep_test.py
 
 GitHub Actions runs these checks on pull requests and pushes to `main`, using Node 24 and Python 3.13. The workflow uses commit-pinned official actions and a read-only repository token.
 
-`lib/song.ts` defines shared data shapes. The modules in `lib/`, including the scene renderer and its shader dependencies, use JSDoc references and strict TypeScript. `tsconfig.browser.json` additionally checks every first-party browser/worker entry point that starts with `// @ts-check`; it leaves `checkJs` off so vendor code stays unchecked, and `typecheck-coverage.test.mjs` requires the pragma on every root `.js` file. Strict null checking is enabled for these entry points too. Inferred parameters and some legacy state still use implicit `any`; this is not a claim that the entry point is fully strict. Vendor implementation code is excluded from checking. `lib/worker.ts` defines the request/reply protocol on both sides, and `lib/scene.ts` defines the renderer frame. JavaScript remains the browser source, with no generated files.
+`lib/song.ts` defines shared data shapes. The modules in `lib/`, including the scene renderer and its shader dependencies, use JSDoc references and strict TypeScript. `tsconfig.browser.json` additionally checks every first-party browser/worker entry point that starts with `// @ts-check`; it leaves `checkJs` off so vendor code stays unchecked, and `typecheck-coverage.test.mjs` requires the pragma on every root `.js` file. Strict null and implicit-any checks are enabled for these entry points too. Explicit JSDoc types cover lifecycle state and parameters. Runtime JSON and unchecked vendor APIs still need validation where their data crosses a trust boundary; compiler checks do not establish runtime validity. Vendor implementation code is excluded from checking. `lib/worker.ts` defines the request/reply protocol on both sides, and `lib/scene.ts` defines the renderer frame. JavaScript remains the browser source, with no generated files.
 
 Run `npm run format` after changing the entry point, page, styles or library modules. Readability is intentional: expand state transitions into steps and prefer descriptive names over reducing line count.
 
@@ -56,7 +57,7 @@ New module tests should import the real module and exercise its public interface
 
 ## Remaining migration
 
-The refactor separates storage, import validation, timing calculations, synthesized audio and recorded-stem playback from application coordination. Input routing, gameplay rules, catalog/search state and scene rendering now have explicit interfaces. The app still coordinates playback, import jobs, animation and screen composition. The remaining type work is to replace the entry point’s remaining implicit `any` lifecycle state and inferred parameters with explicit types; the existing strict library check must stay enabled.
+The refactor separates storage, import validation, timing calculations, synthesized audio and recorded-stem playback from application coordination. Input routing, gameplay rules, catalog/search state and scene rendering now have explicit interfaces. The app still coordinates playback, import jobs, animation and screen composition. Pause sessions have an independent audio lifecycle test; application integration tests still check frozen rendering, restart and resume failures. Keep both strict projects enabled.
 
 Keep the existing browser runtime for now. [The framework decision](FRAMEWORK-DECISION.md) records the rationale, current limits and concrete triggers for reconsidering a framework for DOM screens.
 
