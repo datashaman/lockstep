@@ -1,5 +1,5 @@
 // @ts-check
-// Browser charting inspired by prep.py; same song format, different onset and audibility heuristics.
+// Shared charting for browser imports and offline prep.py.
 // Input: stems as { drums, bass, vocals, other } -> { left, right } Float32Array at 44.1 kHz.
 // Output: the same song shape prep.py writes ({ duration, beats, downbeat, tracks: [{ name, notes: [[t, lane]] }] }).
 import { fft } from "./vendor/demucs-web/fft.js";
@@ -162,7 +162,7 @@ const at = (env, t) => {
 // Steady-tempo grid: autocorrelation picks the tempo (log-normal prior around 120 BPM, like librosa),
 // then a fine search over period and phase maximises onset strength on the beats.
 // ponytail: assumes one steady tempo; songs that drift or change tempo need a dynamic-programming beat tracker.
-export function grid(env, duration) {
+export function grid(env, duration, forcedBpm = 0) {
   let mean = 0;
   for (const v of env) mean += v;
   mean /= env.length;
@@ -182,11 +182,15 @@ export function grid(env, duration) {
       lag0 = L;
     }
   }
-  const bpm0 = (FPS * 60) / lag0;
+  const bpm0 = forcedBpm || (FPS * 60) / lag0;
   best = -Infinity;
   let period = 60 / bpm0,
     phase = 0;
-  for (let bpm = bpm0 * 0.97; bpm <= bpm0 * 1.03; bpm += 0.01) {
+  for (
+    let bpm = forcedBpm || bpm0 * 0.97;
+    bpm <= (forcedBpm || bpm0 * 1.03);
+    bpm += 0.01
+  ) {
     const p = 60 / bpm;
     for (let ph = 0; ph < p; ph += 0.002) {
       let s = 0;
@@ -327,9 +331,16 @@ function chart(y, ft, mixRms, beats, bars, pitch, density) {
 }
 
 /** @param {Record<string,{left:Float32Array,right:Float32Array}>} stems
- * @param {{density?:number,onProgress?:(progress:number)=>void}} [options]
+ * @param {{density?:number,bpm?:number,onProgress?:(progress:number)=>void}} [options]
  * @returns {import("./lib/song").SongChart} */
-export function analyze(stems, { density = 2, onProgress = () => {} } = {}) {
+export function analyze(
+  stems,
+  { density = 2, bpm, onProgress = () => {} } = {},
+) {
+  if (![1, 2, 4].includes(density))
+    throw new Error("Density must be 1, 2 or 4.");
+  if (bpm !== undefined && (!Number.isFinite(bpm) || bpm < 20 || bpm > 400))
+    throw new Error("BPM must be between 20 and 400.");
   const ys = {},
     ft = {};
   STEMS.forEach(([s], i) => {
@@ -342,7 +353,7 @@ export function analyze(stems, { density = 2, onProgress = () => {} } = {}) {
   for (const [s] of STEMS)
     for (let i = 0; i < mix.length; i++) mix[i] += ys[s][i];
   const mixFt = features(mix),
-    beats = align(grid(mixFt.env, duration), ft.drums.env);
+    beats = align(grid(mixFt.env, duration, bpm), ft.drums.env);
   onProgress(5 / 6);
   // downbeat = the bar phase (0-3) whose beats carry the most kick energy; flux peaks lead the beat like onsets do
   const lf = ft.drums.lowFlux,

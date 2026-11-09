@@ -62,8 +62,8 @@ Your best grade and score for each song and difficulty are kept in this browser.
 
 ## Offline charting (optional)
 
-`prep.py` does the same separation and charting in Python and writes `songs/<slug>/` for songs served
-with the game. Stem caches are keyed by the source audio hash. Reusing a title with different audio is rejected; choose a different `--title`. Existing output directories without a source hash are also protected from overwriting. Setup: `uv venv && uv pip install demucs librosa soundfile`, plus `ffmpeg` on PATH; run with `.venv/bin/python prep.py song.mp3`.
+`prep.py` separates audio in Python, runs the shared `analyze.js` chart engine through Node.js, and writes `songs/<slug>/` for songs served
+with the game. Stem caches are keyed by the source audio hash. Reusing a title with different audio is rejected; choose a different `--title`. Existing output directories without a source hash are also protected from overwriting. Setup: `uv venv && uv pip install demucs librosa soundfile`, plus Node.js 24 and `ffmpeg` on PATH; run with `.venv/bin/python prep.py song.mp3`. `--bpm` accepts 20–400 BPM; `--density` accepts 1, 2 or 4 notes per beat. Existing shipped charts stay unchanged until regenerated.
 Do not commit songs you don't own the rights to; `.gitignore` keeps everything but the generated test song out.
 
 ## Development

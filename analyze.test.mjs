@@ -35,3 +35,9 @@ assert(kickLanes.length >= kicks.length - 1 && kickLanes.filter(l => l === 0).le
 assert(song.tracks[3].notes.length === 0, `bleed-only stem got ${song.tracks[3].notes.length} notes`);
 assert(new Set(bs.notes.map(n => n[1])).size === 3 && new Set(vo.notes.map(n => n[1])).size === 3, 'pitched lanes should use all three');
 console.log(`ok: ${song.bpm} BPM, beat error ${(beatErr * 1000).toFixed(1)} ms, notes ${song.tracks.map(t => `${t.name} ${t.notes.length}`).join(', ')}`);
+
+for (const options of [{ bpm: 0 }, { bpm: Infinity }, { bpm: 401 }, { density: 3 }])
+  assert.throws(() => analyze({}, options), /BPM|Density/);
+const forced = analyze({ drums: st(drums), bass: st(bass), vocals: st(vocals), other: st(other) }, { bpm: 120, density: 1 });
+assert.equal(forced.bpm, 120);
+assert(forced.beats.slice(1).every((beat, i) => Math.abs(beat - forced.beats[i] - .5) < .00011));
