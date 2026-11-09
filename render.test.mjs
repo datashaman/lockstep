@@ -73,7 +73,7 @@ console.log('ok: capture fade, expiration, silent tracks, 0–4 captures, handof
 // Rapid switches start from the craft's visible position, without teleporting.
 motion.matches = false;
 vm.runInContext(`
-  ac = { currentTime: 0 }; t0 = 0; hiss = () => {};
+  audio = { stopSounds() {}, restoreVolume() {}, mute() {} }; ac = { currentTime: 0 }; t0 = 0; audio.playSwitch = () => {};
   tracks.forEach(tr => tr.capTo = -1); cur = 0; dash = null; rt = 20;
   assert.equal(craftX(), trackX(0));
   move(1); assert.equal(cur, 1); assert.equal(craftX(), trackX(0));
@@ -194,7 +194,7 @@ console.log('ok: auto-track entry, exit and re-entry, capture intact, silent tra
 
 vm.runInContext(`
   song = demoSong(); song.synth = false; ac = { currentTime: 0 }; reset(); t0 = 0; offset = 0;
-  captureSfx = () => {}; tone = () => {}; rt = 40;
+  audio.playCapture = () => {}; audio.playCountIn = () => {}; rt = 40;
   const note = t => ({ t, lane: 0, bar: 0, hit: false, missed: false });
   tracks[0].notes = [note(0), note(1)]; tracks[1].notes = [note(0)];
   tracks[2].notes = [note(1)]; tracks[3].notes = [];
@@ -326,8 +326,8 @@ vm.runInContext(`
     assert.ok(Math.abs(audioTime(songTime(elapsed)) - elapsed) < 1e-8, 'transport remains invertible through repeated changes');
   }
   const priorBest = JSON.stringify(best);
-  voice({ stop: () => stopped.push('synth'), disconnect() {} }); changeGroove(-100);
-  assert.equal(mode, 'failed'); assert.equal(srcs.length, 0); assert.equal(voices.size, 0);
+  audio.stopSounds = () => stopped.push('synth'); changeGroove(-100);
+  assert.equal(mode, 'failed'); assert.equal(srcs.length, 0);
   assert.equal(stopped.length, 5); assert.equal(JSON.stringify(best), priorBest, 'failed run does not save a best');
   const frozen = now(); ac.currentTime += 20; assert.equal(now(), frozen); drawFailure();
   reset(); assert.equal(groove, 100); assert.equal(missStreak, 0); assert.equal(tempo.length, 1); assert.equal(mode, 'play');
@@ -353,7 +353,7 @@ vm.runInContext(`
 `, context);
 vm.runInContext(`
   reset(); t0 = 0; ac.currentTime = 0; song.synth = true; groove = 20; setTempo(.5);
-  const scheduled = []; play = (kind, lane, b, when) => scheduled.push(when); hiss = () => {}; pad = () => {}; tone = () => {};
+  const scheduled = []; audio.playNote = (kind, lane, b, when) => scheduled.push(when); audio.playSwitch = () => {}; audio.playPad = () => {}; audio.playCountIn = () => {}; audio.playHiHat = () => {};
   tracks.forEach(tr => { tr.notes = []; tr.capFrom = 0; tr.capTo = 8; });
   tracks[0].notes = [{ t: 1, lane: 0, bar: 0, hit: false, missed: false }];
   sched = .9; ac.currentTime = audioTime(1) - .05;
@@ -374,7 +374,9 @@ vm.runInContext(`
 vm.runInContext(`
   const sourceStarts = [], volumeEvents = [];
   const gainParam = { value: 0, cancelScheduledValues() {}, setValueAtTime: v => volumeEvents.push(v), setTargetAtTime: v => volumeEvents.push(v) };
-  out = { gain: gainParam };
+  audio.output = { gain: gainParam };
+  audio.restoreVolume = () => gainParam.setValueAtTime(.8);
+  audio.mute = () => gainParam.setTargetAtTime(0);
   ac = { currentTime: 10, state: 'running',
     createBufferSource: () => ({ playbackRate: { setValueAtTime() {} }, disconnect() {}, connect: target => target, start: at => sourceStarts.push(at), stop() {} }),
     createGain: () => ({ gain: gainParam, connect() {}, disconnect() {} }),
