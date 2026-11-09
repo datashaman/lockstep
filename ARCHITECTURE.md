@@ -56,6 +56,6 @@ New module tests should import the real module and exercise its public interface
 
 ## Remaining migration
 
-This first extraction removes storage, import validation, timing calculations, synthesized audio and recorded-stem playback from the application. Input routing, gameplay rules, catalog/search state and scene rendering now have explicit interfaces. The app still coordinates playback, import jobs, animation and screen composition. The remaining type work is to tighten the entry point’s nullable lifecycle state and inferred parameters; the existing strict library check must stay enabled.
+The refactor separates storage, import validation, timing calculations, synthesized audio and recorded-stem playback from application coordination. Input routing, gameplay rules, catalog/search state and scene rendering now have explicit interfaces. The app still coordinates playback, import jobs, animation and screen composition. The remaining type work is to tighten the entry point’s nullable lifecycle state and inferred parameters; the existing strict library check must stay enabled.
 
-A UI framework can be evaluated when the library/search/settings screens have an independent state model. It is not needed for the Canvas or audio engines, and no framework migration is part of this change.
+Keep the existing browser runtime for now. [The framework decision](FRAMEWORK-DECISION.md) records the rationale, current limits and concrete triggers for reconsidering a framework for DOM screens.
