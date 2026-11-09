@@ -9,11 +9,12 @@ Lockstep is still a static site. `index.html` loads `app.js` as a native JavaScr
 | Library saving, deletion, re-chart persistence | `lib/song-library.js` | `audit.test.mjs` |
 | Import duration/size limits and download reading | `lib/audio-import.js` | `audit.test.mjs` |
 | Synth instruments, count-in, capture sounds, echo and master volume | `lib/audio-engine.js` | `audio.test.mjs`, `performance.test.mjs` |
+| Recorded stems and looping menu previews | `lib/stem-player.js` | `stem-player.test.mjs`, `performance.test.mjs` |
 | Tempo slowdown and song/audio time conversion | `lib/transport.js` | `timing.test.mjs`, `render.test.mjs` |
 | Beat positions and difficulty thinning | `lib/beat-grid.js` | `timing.test.mjs`, `performance.test.mjs` |
 | Stored chart, PCM and tempo data types | `lib/song.ts` | `npm run typecheck` |
 | Native controls and page layout | `index.html`, `styles.css` | `touch.test.mjs` |
-| Screen flow, current run state, input, Canvas drawing and stem/preview playback | `app.js` | renderer, touch, materials and performance tests |
+| Screen flow, current run state, input, Canvas drawing and playback coordination | `app.js` | renderer, touch, materials and performance tests |
 | Stem separation and worker messages | `separator.js`, `vendor/demucs-web/processor.js` | separation and audit tests |
 | Automatic note chart generation | `analyze.js` | `analyze.test.mjs` |
 | GPU materials | `shader-renderer.js`, `theme-shaders.js`, `liquid-shader.js` | shader and materials tests |
@@ -22,7 +23,8 @@ Lockstep is still a static site. `index.html` loads `app.js` as a native JavaScr
 
 - The library module owns IndexedDB. Callers ask it to list, load audio, save, update a chart or remove a song; they do not name object stores or manage transactions. Both audio and metadata commit together. Updating a chart never recreates a deleted entry.
 - Import helpers own validation and metadata/download resources. They report errors to the caller; they do not change the selected song or show toasts.
-- The audio engine owns its master/echo graph and transient synthesized sounds. The app owns the AudioContext, pause/resume, and absolute scheduling times. Sound methods take times in audio-clock seconds; `stopSounds()` disconnects temporary graphs but preserves the reusable master graph. Stem and preview sources connect to `audio.output`.
+- The audio engine owns its master/echo graph and transient synthesized sounds. The app owns the AudioContext, pause/resume, and absolute scheduling times. Sound methods take times in audio-clock seconds; `stopSounds()` disconnects temporary graphs but preserves the reusable master graph. The stem players connect to `audio.output`.
+- Each stem player owns one group of recorded sources and gains. Gameplay and preview use separate players. Starting a group replaces the previous group; stopping or natural completion releases nodes. The app supplies loop bounds and scheduling times, and still owns pause/resume of the shared context.
 - Timing modules are pure calculations. They receive the beat grid or tempo segments explicitly and never read an audio context, DOM node or global game state. Time is measured in seconds.
 - `app.js` coordinates these modules. Song storage and timing must not import the app or renderer.
 - Stored PCM is signed 16-bit stereo at 44.1 kHz, in chart-track order. Separation still runs on float audio in its worker. Do not retain both full representations on the main thread.
@@ -47,6 +49,6 @@ New module tests should import the real module and exercise its public interface
 
 ## Remaining migration
 
-This first extraction removes storage, import validation, timing calculations and synthesized audio from the application. The Canvas renderer, stem/preview playback, menu flow and input routing still share application state. Move those one at a time with their existing regression checks; do not split them into files that silently share globals.
+This first extraction removes storage, import validation, timing calculations, synthesized audio and recorded-stem playback from the application. The Canvas renderer, menu flow and input routing still share application state. Move those one at a time with their existing regression checks; do not split them into files that silently share globals.
 
 A UI framework can be evaluated when the library/search/settings screens have an independent state model. It is not needed for the Canvas or audio engines, and no framework migration is part of this change.

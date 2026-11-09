@@ -1,3 +1,4 @@
+import { createStemPlayer } from "./lib/stem-player.js";
 import { createAudioEngine } from "./lib/audio-engine.js";
 import { songPosition, audioElapsed } from "./lib/transport.js";
 import {
@@ -171,6 +172,8 @@ const demoSong = () => ({
 // ---------- state ----------
 let ac,
   audio,
+  stemPlayer,
+  previewPlayer,
   t0,
   sched,
   song = demoSong(),
@@ -182,8 +185,7 @@ let ac,
 let mode = "title",
   catalog = [],
   sel = 0,
-  loadErr = "",
-  srcs = [];
+  loadErr = "";
 let level = +(globalThis.localStorage?.lockstepLevel ?? 1);
 let offset = +(globalThis.localStorage?.lockstepOffset || 0),
   offsetAt = -9; // player's audio calibration, seconds
@@ -246,7 +248,7 @@ function setTempo(rate) {
   const at = ac.currentTime - t0 + 0.15,
     pos = songTime(at);
   tempo.push({ at, pos, rate });
-  for (const s of srcs) s.playbackRate.setValueAtTime(rate, t0 + at);
+  stemPlayer?.setRate(rate, t0 + at);
 }
 function changeGroove(amount) {
   groove = Math.max(0, Math.min(100, groove + amount));
@@ -318,13 +320,7 @@ function phraseNotes(tr, phrase) {
   );
 }
 
-const stopStems = () => {
-  srcs.forEach((s) => {
-    s.stop();
-    s.onended?.();
-  });
-  srcs = [];
-};
+const stopStems = () => stemPlayer?.stop();
 function reset(menuImage = null) {
   setGrid(song);
   tracks = buildTracks();
@@ -355,23 +351,7 @@ function reset(menuImage = null) {
   t0 = ac.currentTime + LEAD_IN;
   sched = -LEAD_IN;
   stopStems();
-  if (song.buffers)
-    tracks.forEach((tr, i) => {
-      const s = ac.createBufferSource(),
-        v = ac.createGain();
-      s.onended = () => {
-        s.disconnect();
-        v.disconnect();
-        s.onended = null;
-      };
-      s.buffer = song.buffers[i];
-      v.gain.value = 0;
-      s.connect(v).connect(audio.output);
-      s.start(t0);
-      srcs.push(s);
-      tr.gain = v;
-      tr.level = 0;
-    });
+  if (song.buffers) stemPlayer.start(song.buffers, t0);
 }
 // ---------- song sources: built-in demo · your library (separated in this browser, kept in IndexedDB) · songs/ (prep.py) ----------
 const DEMO = { title: "Demo (synth)" },
@@ -573,22 +553,12 @@ function toTitle() {
 }
 
 // The title screen's backdrop is the selected song: its chart scrolls behind the menu and its stems play quietly, looping from ~30 s in.
-let pv = [],
-  pvGain = null,
-  pvT0 = 0,
+let pvT0 = 0,
   pvFrom = 0,
   pvFor = null,
   pvTimer,
   pvN = 0;
-const stopPreview = () => {
-  pv.forEach((s) => {
-    s.stop();
-    s.disconnect();
-  });
-  pv = [];
-  pvGain?.disconnect();
-  pvGain = null;
-};
+const stopPreview = () => previewPlayer?.stop();
 function showSelected() {
   clearTimeout(pvTimer);
   const e = catalog[sel],
@@ -606,20 +576,11 @@ function showSelected() {
       stopPreview();
       pvFrom = Math.min(30, song.duration * 0.3);
       if (!ac || !song.buffers) return;
-      const v = (pvGain = ac.createGain());
-      v.gain.value = 0.35;
-      v.connect(audio.output);
       pvT0 = ac.currentTime + 0.05;
-      for (const b of song.buffers) {
-        const src = ac.createBufferSource();
-        src.buffer = b;
-        src.loop = true;
-        src.loopStart = pvFrom;
-        src.loopEnd = song.duration;
-        src.connect(v);
-        src.start(pvT0, pvFrom);
-        pv.push(src);
-      }
+      previewPlayer.start(song.buffers, pvT0, {
+        volume: 0.35,
+        loop: { from: pvFrom, to: song.duration },
+      });
     } catch (err) {
       if (n === pvN)
         say(`could not load ${e.title}: ${err.message || err}`, "err");
@@ -627,7 +588,7 @@ function showSelected() {
   }, 250);
 }
 const attract = () => {
-  if (!pv.length) return rt % song.duration;
+  if (!previewPlayer?.playing) return rt % song.duration;
   const el = Math.max(
     0,
     ac.currentTime - pvT0 - (ac.outputLatency || ac.baseLatency || 0),
@@ -1020,6 +981,8 @@ function initAudio() {
     barLength: BARLEN,
     chords: CHORDS,
   });
+  stemPlayer = createStemPlayer(ac, audio.output);
+  previewPlayer = createStemPlayer(ac, audio.output);
 }
 
 // ---------- fx (x is in hit-plane world space: screen x = W/2 + x - camX) ----------
@@ -1480,7 +1443,7 @@ function logic(t) {
     for (let b = Math.ceil(sched / BARLEN); b * BARLEN < upto && b < BARS; b++)
       if (b >= 0) audio.playPad(b, audioTime(b * BARLEN));
   }
-  for (const tr of tracks) {
+  for (const [trackIndex, tr] of tracks.entries()) {
     if (song.synth)
       for (
         let k = noteIndex(tr.notes, sched);
@@ -1517,20 +1480,16 @@ function logic(t) {
         if (mode === "failed") return;
       }
     }
-    if (tr.gain) {
-      const lv = locked(tr, t)
-        ? LIVE
-        : tr === tracks[cur]
-          ? tr.live
-            ? LIVE
-            : CUE
-          : GHOST;
-      if (lv !== tr.level) {
-        tr.level = lv;
-        tr.gain.gain.setTargetAtTime(lv, ac.currentTime, 0.02);
-      }
-    }
+    const volume = locked(tr, t)
+      ? LIVE
+      : tr === tracks[cur]
+        ? tr.live
+          ? LIVE
+          : CUE
+        : GHOST;
+    stemPlayer?.setLevel(trackIndex, volume);
   }
+
   updateSync(t);
   sched = upto;
   if (t > end + 1) {

@@ -310,7 +310,7 @@ vm.runInContext(`
   pauseState = null; song = demoSong(); song.synth = false;
   ac = { currentTime: 0 }; offset = 0; reset(); t0 = 0;
   const rateEvents = [], stopped = [];
-  srcs = [0, 1, 2, 3].map(i => ({ playbackRate: { setValueAtTime: (rate, at) => rateEvents.push([i, rate, at]) }, stop: () => stopped.push(i) }));
+  stemPlayer = { playing: true, setRate(rate, at) { for (let i = 0; i < 4; i++) rateEvents.push([i, rate, at]); }, stop() { if (this.playing) for (let i = 0; i < 4; i++) stopped.push(i); this.playing = false; }, setLevel() {} };
   ac.currentTime = 10;
   changeGroove(-80);
   assert.equal(groove, 20); assert.equal(tempo.at(-1).rate, .775);
@@ -327,7 +327,7 @@ vm.runInContext(`
   }
   const priorBest = JSON.stringify(best);
   audio.stopSounds = () => stopped.push('synth'); changeGroove(-100);
-  assert.equal(mode, 'failed'); assert.equal(srcs.length, 0);
+  assert.equal(mode, 'failed'); assert.equal(stemPlayer.playing, false);
   assert.equal(stopped.length, 5); assert.equal(JSON.stringify(best), priorBest, 'failed run does not save a best');
   const frozen = now(); ac.currentTime += 20; assert.equal(now(), frozen); drawFailure();
   reset(); assert.equal(groove, 100); assert.equal(missStreak, 0); assert.equal(tempo.length, 1); assert.equal(mode, 'play');
@@ -382,6 +382,7 @@ vm.runInContext(`
     createGain: () => ({ gain: gainParam, connect() {}, disconnect() {} }),
     suspend: async () => { ac.state = 'suspended'; }, resume: async () => { ac.state = 'running'; }
   };
+  stemPlayer = createStemPlayer(ac, audio.output);
   song.buffers = [{}, {}, {}, {}]; reset(); assert.deepEqual(sourceStarts, [13, 13, 13, 13]);
   ac.currentTime = 20; changeGroove(-80); ac.currentTime = 21;
   const lowTempoPosition = now(), lowTempoSchedule = JSON.stringify(tempo);
@@ -391,9 +392,9 @@ wallTime += 15;
 await vm.runInContext('resumeGame()', context);
 vm.runInContext(`
   assert.equal(now(), lowTempoPosition); assert.equal(JSON.stringify(tempo), lowTempoSchedule);
-  assert.equal(groove, 20); assert.equal(srcs.length, 4, 'pause does not restart stems');
+  assert.equal(groove, 20); assert.equal(stemPlayer.playing, true); assert.equal(sourceStarts.length, 4, 'pause does not restart stems');
   changeGroove(-100); assert.equal(volumeEvents.at(-1), 0);
-  reset(); assert.equal(volumeEvents.at(-1), .8); assert.equal(srcs.length, 4); assert.equal(tempo.length, 1);
+  reset(); assert.equal(volumeEvents.at(-1), .8); assert.equal(stemPlayer.playing, true); assert.equal(tempo.length, 1);
 `, context);
 console.log('ok: consecutive-miss failure, clickable retry, stem start alignment, low-tempo pause/resume and volume restoration');
 
@@ -526,7 +527,7 @@ await vm.runInContext(`(async () => {
   trackDialog = () => ({ d: { get open() { return dialogOpen; }, insertBefore: b => button = b, close: () => { dialogOpen = false; } }, status, close: {} });
   document.createElement = () => ({ focus() {} });
   resolveSharedTrack = async () => track;
-  ac = { resume: async () => {} }; pv = []; pvGain = null; start = async () => played++;
+  ac = { resume: async () => {} }; previewPlayer = undefined; start = async () => played++;
   setInterval = () => 1; clearInterval = () => {};
   queueAudius = (t, done) => pendingImport = done;
   library = [];
