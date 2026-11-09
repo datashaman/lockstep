@@ -11,7 +11,7 @@ Drop an audio file on the title screen and it is split into drums, bass, vocals 
 automatically. Your songs never leave your machine: separation runs locally and the result is kept in
 the browser's own storage.
 
-New imports are temporarily disabled on iPhone/iPad until separation is validated within real-device memory limits; existing library and built-in songs remain playable. On other devices, imports must be 1 second–10 minutes and at most 64 MiB. Duration is checked before decoding, and oversized downloads are stopped. These limits bound input size but do not guarantee separation will fit every device; the model and full-song stems still need substantial memory.
+Imports remain available on iPhone/iPad and other devices. Files must be 1 second–10 minutes and at most 64 MiB. Duration is checked before decoding, and oversized downloads are stopped. Decoded input is released before waiting for separation, and the worker transfers only 16-bit PCM after charting instead of full float stems. These limits bound input size but do not guarantee separation will fit every device; the model and full-song stems still need substantial memory.
 
 No file handy? Pick **Find a song on Audius** on the title screen to browse trending tracks or type to search
 [Audius](https://audius.co), then press Enter to add one. Tracks stream straight from Audius and are used under the

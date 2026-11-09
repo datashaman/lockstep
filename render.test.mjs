@@ -506,7 +506,7 @@ await vm.runInContext(`(async () => {
   const writes = [];
   saveSong = async (...args) => writes.push(args);
   importDuration = async () => {};
-  work = async () => ({ song: { bpm: 120, tracks: [] }, stems: {} });
+  work = async () => ({ song: { bpm: 120, tracks: [] }, pcm: [] });
   library = []; jobs = []; job = null;
   let imported;
   jobs.push({ title: 'Shared song', url: sourceURL, bytes: async () => new ArrayBuffer(4), done: e => imported = e });

@@ -282,7 +282,6 @@ const saveSong = (row, pcm) => dbTransaction(['songs', 'pcm'], 'readwrite', tx =
 const deleteSong = id => dbTransaction(['songs', 'pcm'], 'readwrite', tx => {
   tx.objectStore('pcm').delete(id); tx.objectStore('songs').delete(id);
 });
-const f2i = a => { const o = new Int16Array(a.length); for (let i = 0; i < a.length; i++) o[i] = Math.max(-1, Math.min(1, a[i])) * 32767; return o; };
 const i2f = (a, o = new Float32Array(a.length)) => { for (let i = 0; i < a.length; i++) o[i] = a[i] / 32767; return o; };
 const hex = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
 
@@ -353,13 +352,7 @@ const pick = i => { if (i >= 0 && i !== sel) { sel = i; delArm = -9; titleEntry 
 function setLevel(lv) { level = Math.max(0, Math.min(2, lv)); if (globalThis.localStorage) localStorage.lockstepLevel = level; setGrid(song); tracks = buildTracks(); }
 
 // Add songs: decode -> separate + chart in a worker (separator.js) -> store stems as 16-bit PCM in IndexedDB.
-// shortcut: iOS separation remains disabled until real-device memory validation supports a safe limit.
 const MAX_IMPORT_BYTES = 64 * 1024 * 1024, MAX_IMPORT_SECONDS = 600;
-function checkImportDevice() {
-  const nav = globalThis.navigator;
-  if (/iPad|iPhone|iPod/.test(nav?.userAgent || '') || (nav?.platform === 'MacIntel' && nav?.maxTouchPoints > 1))
-    throw new Error('New song imports are temporarily unavailable on iPhone/iPad. Existing library and built-in songs still play.');
-}
 function checkImportSize(size) { if (size > MAX_IMPORT_BYTES) throw new Error('Audio files must be 64 MiB or smaller.'); }
 function checkImportDuration(duration) {
   if (!Number.isFinite(duration) || duration < 1 || duration > MAX_IMPORT_SECONDS) throw new Error('Audio must be between 1 second and 10 minutes.');
@@ -392,19 +385,18 @@ async function nextJob() {
   const j = jobs.shift(); if (!j) { job = null; releaseWorker(); return; } // j: { title, bytes: () => Promise<ArrayBuffer>, url? (where it came from) }
   job = { title: j.title, phase: j.url ? 'download' : 'decode', progress: 0 };
   try {
-    checkImportDevice();
-    const bytes = await j.bytes(); checkImportSize(bytes.byteLength); job.phase = 'decode';
+    let bytes = await j.bytes(); checkImportSize(bytes.byteLength); job.phase = 'decode';
     const id = hex(await crypto.subtle.digest('SHA-256', bytes)).slice(0, 16);
     const existing = library.find(e => e.lib === id);
     if (existing) { say(`${job.title} is already in your library`, 'info'); j.done?.(existing); return nextJob(); }
     await importDuration(bytes);
-    const ab = await new OfflineAudioContext(2, 1, 44100).decodeAudioData(bytes); // resamples to the model's 44.1 kHz
+    let ab = await new OfflineAudioContext(2, 1, 44100).decodeAudioData(bytes); // resamples to the model's 44.1 kHz
     checkImportDuration(ab.duration);
     const left = ab.getChannelData(0).slice(), right = ab.getChannelData(ab.numberOfChannels > 1 ? 1 : 0).slice();
-    const { song: meta, stems } = await work({ id, left, right }, [left.buffer, right.buffer], d => Object.assign(job, d));
+    ab = null; bytes = null; // Release decoded/compressed input before waiting for separation.
+    const { song: meta, pcm } = await work({ id, left, right }, [left.buffer, right.buffer], d => Object.assign(job, d));
     job.phase = 'save';
-    await saveSong({ id, title: job.title, url: j.url, song: meta, added: Date.now() },
-      meta.tracks.map(tr => [f2i(stems[tr.stem].left), f2i(stems[tr.stem].right)]));
+    await saveSong({ id, title: job.title, url: j.url, song: meta, added: Date.now() }, pcm);
     navigator.storage?.persist?.(); // ask the browser not to evict the library under storage pressure
     const entry = { title: job.title, url: j.url, lib: id, meta };
     library.push(entry); rebuild(); say(`added ${job.title} · ${meta.bpm} BPM`); j.done?.(entry);

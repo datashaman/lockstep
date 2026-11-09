@@ -1,7 +1,7 @@
 // Module worker: Demucs stem separation (onnxruntime-web, WebGPU with WASM fallback) + charting, off the main thread.
 // in:  { id, left, right }  stereo Float32Array @ 44.1 kHz (transferred) — separate + chart
 //  or  { id, stems }  already-separated stems — re-chart only (no model needed)
-// out: { id, type: 'progress', phase: 'model' | 'separate' | 'chart', progress }  then  { id, type: 'done', song, stems }  or  { id, type: 'error', message }
+// out: { id, type: 'progress', phase: 'model' | 'separate' | 'chart', progress }  then  { id, type: 'done', song, pcm }  or  { id, type: 'error', message }
 import { DemucsProcessor, CONSTANTS } from './vendor/demucs-web/index.js';
 import { analyze } from './analyze.js';
 
@@ -20,6 +20,8 @@ async function modelBytes(post) {
   return blob.arrayBuffer();
 }
 
+const f2i = a => { const o = new Int16Array(a.length); for (let i = 0; i < a.length; i++) o[i] = Math.max(-1, Math.min(1, a[i])) * 32767; return o; };
+
 let proc, queue = Promise.resolve();
 onmessage = ({ data: { id, left, right, stems: given } }) => queue = queue.then(async () => {
   const post = (phase, progress) => postMessage({ id, type: 'progress', phase, progress });
@@ -36,9 +38,12 @@ onmessage = ({ data: { id, left, right, stems: given } }) => queue = queue.then(
     proc.onProgress = p => post('separate', p.progress);
     post('separate', 0);
     const stems = await proc.separate(left, right);
+    left = right = null; // Input is no longer needed during charting and PCM packing.
     const song = analyze(stems, { onProgress: p => post('chart', p) });
-    const buffers = Object.values(stems).flatMap(s => [s.left.buffer, s.right.buffer]);
-    postMessage({ id, type: 'done', song, stems }, buffers);
+    // Replace channels one at a time; never send the full float stems alongside their stored PCM copy.
+    for (const stem of Object.values(stems)) for (const channel of ['left', 'right']) stem[channel] = f2i(stem[channel]);
+    const pcm = song.tracks.map(tr => [stems[tr.stem].left, stems[tr.stem].right]);
+    postMessage({ id, type: 'done', song, pcm }, pcm.flat().map(channel => channel.buffer));
   } catch (err) {
     postMessage({ id, type: 'error', message: String(err?.message || err) });
   }
