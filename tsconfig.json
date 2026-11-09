@@ -15,8 +15,5 @@
   "include": [
     "lib/**/*.js",
     "lib/**/*.ts"
-  ],
-  "exclude": [
-    "lib/scene-renderer.js"
   ]
 }

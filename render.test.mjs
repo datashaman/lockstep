@@ -544,3 +544,13 @@ console.log('ok: Audius-only share URLs, resolver validation, unavailable tracks
 const beforeSnapshots = snapshots;
 vm.runInContext("mode = 'title'; scene.renderScene(1, false)", context);
 assert.equal(snapshots - beforeSnapshots, 1, 'one frame snapshot, including nested menu text calls');
+// Drawing cannot mutate scoring, captures or note judgement.
+vm.runInContext(`
+  Object.freeze(run);
+  for (const track of tracks) {
+    track.notes.forEach(Object.freeze); Object.freeze(track.notes); Object.freeze(track);
+  }
+  Object.freeze(tracks);
+  scene.renderScene(1, true);
+`, context);
+console.log('ok: renderer accepts frozen gameplay state');

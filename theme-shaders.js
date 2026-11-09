@@ -1,5 +1,6 @@
-import { createMaterialShader } from './shader-renderer.js';
-import { LIQUID_FRAGMENT } from './liquid-shader.js';
+// @ts-check
+import { createMaterialShader } from "./shader-renderer.js";
+import { LIQUID_FRAGMENT } from "./liquid-shader.js";
 
 export const NEON_FRAGMENT = `
 precision mediump float;
@@ -108,15 +109,28 @@ void main() {
 }
 `;
 
-export const THEME_FRAGMENTS = { liquid: LIQUID_FRAGMENT, neon: NEON_FRAGMENT, paper: PAPER_FRAGMENT, circuit: CIRCUIT_FRAGMENT };
+/** @type {Record<string,string>} */
+export const THEME_FRAGMENTS = {
+  liquid: LIQUID_FRAGMENT,
+  neon: NEON_FRAGMENT,
+  paper: PAPER_FRAGMENT,
+  circuit: CIRCUIT_FRAGMENT,
+};
+/** @param {()=>HTMLCanvasElement} [makeCanvas] */
 export function createThemeShader(makeCanvas) {
   const renderer = createMaterialShader(LIQUID_FRAGMENT, makeCanvas);
   if (!renderer) return null;
   return {
-    select(key) { if (Object.hasOwn(THEME_FRAGMENTS, key)) renderer.setFragment(THEME_FRAGMENTS[key]); },
+    /** @param {string} key */
+    select(key) {
+      if (Object.hasOwn(THEME_FRAGMENTS, key))
+        renderer.setFragment(THEME_FRAGMENTS[key]);
+    },
+    /** @param {string} key @param {number} seconds @param {Float32Array} captures @param {number} energy @param {boolean} reducedMotion */
     render(key, seconds, captures, energy, reducedMotion) {
       if (!Object.hasOwn(THEME_FRAGMENTS, key)) return null;
-      this.select(key); return renderer.render(seconds, captures, energy, reducedMotion);
+      this.select(key);
+      return renderer.render(seconds, captures, energy, reducedMotion);
     },
   };
 }
