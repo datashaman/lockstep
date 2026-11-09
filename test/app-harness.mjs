@@ -1,5 +1,7 @@
 import { actionForKey } from '../lib/input-actions.js';
 import * as gameplay from '../lib/gameplay.js';
+import * as songMenu from '../lib/song-menu.js';
+import * as audius from '../lib/audius.js';
 import { readFileSync } from 'node:fs';
 import { createStemPlayer } from '../lib/stem-player.js';
 import { createAudioEngine } from '../lib/audio-engine.js';
@@ -10,6 +12,6 @@ import * as audioImport from '../lib/audio-import.js';
 
 // Legacy Canvas integration tests still inspect app state in a VM. Extracted
 // modules use their real exports here and have separate interface-level tests.
-export const appImports = { ...gameplay, actionForKey, createStemPlayer, createAudioEngine, createSongLibrary, ...audioImport, ...transport, ...beatGrid };
+export const appImports = { ...songMenu, ...audius, ...gameplay, actionForKey, createStemPlayer, createAudioEngine, createSongLibrary, ...audioImport, ...transport, ...beatGrid };
 export const appSource = '"use strict";\n' + readFileSync(new URL('../app.js', import.meta.url), 'utf8')
-  .replace(/^import\s+[\s\S]*?from\s+['"][^'"]+['"];\s*/gm, '') + `\nObject.defineProperties(globalThis, Object.fromEntries(Object.entries({score:'score',mult:'multiplier',hits:'hits',misses:'misses',caps:'captures',groove:'groove',missStreak:'missStreak',cur:'currentTrack'}).map(([name, field]) => [name,{configurable:true,get:()=>run[field],set:value=>run[field]=value}])));`;
+  .replace('const trackDialog =', 'let trackDialog =').replace('const resolveSharedTrack =', 'let resolveSharedTrack =').replace(/^import\s+[\s\S]*?from\s+['"][^'"]+['"];\s*/gm, '') + `\nObject.defineProperties(globalThis, Object.fromEntries(Object.entries({score:'score',mult:'multiplier',hits:'hits',misses:'misses',caps:'captures',groove:'groove',missStreak:'missStreak',cur:'currentTrack'}).map(([name, field]) => [name,{configurable:true,get:()=>run[field],set:value=>run[field]=value}])));\nObject.defineProperties(globalThis, Object.fromEntries(Object.entries({library:'library',server:'server',catalog:'entries',sel:'selected'}).map(([name,field])=>[name,{configurable:true,get:()=>menu[field],set:value=>menu[field]=value}])));`;

@@ -27,3 +27,33 @@ export interface TempoSegment {
   pos: number;
   rate: number;
 }
+
+export interface PlayableSong {
+  title: string;
+  duration: number;
+  beats: number[];
+  downbeat: number;
+  synth?: boolean;
+  buffers?: AudioBuffer[];
+  tracks: { name: string; kind?: string; stem?: string; notes: Note[] }[];
+}
+export interface SongEntry {
+  title: string;
+  lib?: string;
+  slug?: string;
+  url?: string;
+  meta?: SongChart;
+  song?: PlayableSong;
+  add?: boolean;
+  find?: boolean;
+}
+export interface AudiusTrack {
+  id: string;
+  title: string;
+  user: { name: string };
+  permalink: string;
+  duration: number;
+  is_streamable: boolean;
+  access?: { stream?: boolean };
+  preview_start_seconds?: number;
+}
