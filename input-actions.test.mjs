@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { actionForKey } from './lib/input-actions.js';
+for (const [key,lane] of [['j',0],['K',1],['l',2]]) assert.deepEqual(actionForKey('play',key),{type:'hit',lane});
+for (const key of ['a','ArrowLeft']) assert.deepEqual(actionForKey('play',key),{type:'move',delta:-1});
+assert.deepEqual(actionForKey('title','ArrowLeft'),{type:'difficulty',delta:-1});
+assert.deepEqual(actionForKey('pause','Enter'),{type:'resume'});
+assert.deepEqual(actionForKey('failed','Enter'),{type:'restart'});
+assert.deepEqual(actionForKey('title','T',true),{type:'theme',useAsDefault:true});
+assert.deepEqual(actionForKey('pause',']'),{type:'calibrate',delta:1});
+assert.deepEqual(actionForKey('play',' '),{type:'pause'});
+for(const screen of ['loading','find']) for(const key of ['j','Enter','ArrowLeft']) assert.equal(actionForKey(screen,key),null);
+for(const key of ['','jk','unknown']) assert.equal(actionForKey('play',key),null);
+console.log('ok: context-sensitive keyboard/touch actions, modifiers, calibration and inactive screens');

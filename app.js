@@ -1,3 +1,4 @@
+import { actionForKey } from "./lib/input-actions.js";
 import { createStemPlayer } from "./lib/stem-player.js";
 import { createAudioEngine } from "./lib/audio-engine.js";
 import { songPosition, audioElapsed } from "./lib/transport.js";
@@ -1087,85 +1088,99 @@ function tryHit(lane) {
   }
 }
 
+/** @param {import('./lib/input-actions').InputAction} action */
+function dispatchAction(action) {
+  switch (action.type) {
+    case "calibrate":
+      offset = Math.round((offset + action.delta * 0.01) * 100) / 100;
+      offsetAt = rt;
+      if (globalThis.localStorage) localStorage.lockstepOffset = offset;
+      break;
+    case "resume":
+      if (pauseState.deadline) pauseState.deadline = 0;
+      else resumeCountdown();
+      break;
+    case "restart":
+      mode === "pause" ? resumeGame("restart") : reset();
+      break;
+    case "title":
+      mode === "pause" ? resumeGame("menu") : toTitle();
+      break;
+    case "difficulty":
+      setLevel(level + action.delta);
+      break;
+    case "select":
+      pick((sel + action.delta + catalog.length) % catalog.length);
+      break;
+    case "start":
+      start();
+      break;
+    case "theme":
+      chooseTheme(action.useAsDefault);
+      break;
+    case "share":
+      shareTrack(catalog[sel]);
+      break;
+    case "files":
+      picker.click();
+      break;
+    case "find":
+      pick(catalog.indexOf(FIND));
+      start();
+      break;
+    case "help":
+      help = true;
+      break;
+    case "delete":
+      if (!catalog[sel].lib) break;
+      if (rt - delArm < 2) {
+        delArm = -9;
+        removeSong(catalog[sel]);
+      } else {
+        delArm = rt;
+        const key = action.key === "x" ? "X" : action.key;
+        say(
+          touchEnabled
+            ? `tap Delete song again to delete ${catalog[sel].title}`
+            : `press ${key} again to delete ${catalog[sel].title}`,
+          "info",
+        );
+      }
+      break;
+    case "hit":
+      tryHit(action.lane);
+      break;
+    case "move":
+      move(action.delta);
+      break;
+    case "pause":
+      pauseGame();
+      break;
+  }
+}
+
 function handleKey(e) {
   if (e.target?.closest?.("input, select, textarea")) return;
   if ((e.key === " " || e.key === "Enter") && e.target?.closest?.("button"))
     return;
   if (e.metaKey || e.ctrlKey || document.querySelector?.("dialog[open]"))
     return;
-  if (mode === "find") return findKey(e); // before the global keys: the search box takes [ ] and letters
+  if (mode === "find") return findKey(e);
   if (e.repeat) return;
-  const k = e.key.toLowerCase();
-  if (k === "[" || k === "]") {
-    // calibration: raise if notes feel early vs the music, lower if late
-    offset = Math.round((offset + (k === "]" ? 0.01 : -0.01)) * 100) / 100;
-    offsetAt = rt;
-    if (globalThis.localStorage) localStorage.lockstepOffset = offset;
-    return;
-  }
-  if (mode === "pause") {
-    e.preventDefault?.();
-    if (k === " " || k === "enter") {
-      if (pauseState.deadline) pauseState.deadline = 0;
-      else resumeCountdown();
-    } else if (k === "r") resumeGame("restart");
-    else if (k === "escape") resumeGame("menu");
-    return;
-  }
+  const action = actionForKey(mode, e.key, e.shiftKey);
+  if (action?.type === "calibrate") return dispatchAction(action);
+  if (mode === "pause" || action?.type === "pause") e.preventDefault?.();
   if (mode === "title") {
     if (!ac) {
       initAudio();
       showSelected();
-    } // first key: audio is allowed now, so start the backdrop song
+    }
     if (help) {
       help = false;
       return;
     }
-    if (k === "arrowleft" || k === "a" || k === "arrowright" || k === "d")
-      setLevel(level + (k === "arrowleft" || k === "a" ? -1 : 1));
-    else if (k === "arrowup" || k === "w")
-      pick((sel + catalog.length - 1) % catalog.length);
-    else if (k === "arrowdown" || k === "s") pick((sel + 1) % catalog.length);
-    else if (k === "enter" || k === " ") start();
-    else if (k === "t") chooseTheme(e.shiftKey);
-    else if (k === "c") shareTrack(catalog[sel]);
-    else if (k === "o") picker.click();
-    else if (k === "f") {
-      pick(catalog.indexOf(FIND));
-      start();
-    } else if (k === "?" || k === "/") help = true;
-    else if (
-      (k === "x" || k === "delete" || k === "backspace") &&
-      catalog[sel].lib
-    ) {
-      if (rt - delArm < 2) {
-        delArm = -9;
-        removeSong(catalog[sel]);
-      } else {
-        delArm = rt;
-        say(
-          touchEnabled
-            ? `tap Delete song again to delete ${catalog[sel].title}`
-            : `press ${k === "x" ? "X" : k} again to delete ${catalog[sel].title}`,
-          "info",
-        );
-      }
-    }
-    return;
   }
-  if (mode === "over" || mode === "failed") {
-    if (k === " " || k === "enter") reset();
-    else if (k === "escape") toTitle();
-    return;
-  }
-  if (mode !== "play") return;
-  const lane = "jkl".indexOf(k);
-  if (k === " " || k === "escape") {
-    e.preventDefault?.();
-    pauseGame();
-  } else if (lane >= 0) tryHit(lane);
-  else if (k === "a" || k === "arrowleft") move(-1);
-  else if (k === "d" || k === "arrowright") move(1);
+  if (action) dispatchAction(action);
 }
 addEventListener("keydown", handleKey);
 
