@@ -39,7 +39,6 @@ vm.runInContext(`
     assert.equal(material.width, 400); assert.equal(material.height, 300);
     assert.equal(materialTexture(), material, 'reuse each theme material');
   }
-  assert.equal(materialCache.size, 4);
 `, context);
 assert.equal(surfaces, 4);
 const built = builds;

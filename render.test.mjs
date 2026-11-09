@@ -4,6 +4,7 @@ import vm from 'node:vm';
 
 // Exercise the real renderer without audio, network, or a browser animation loop.
 let calls = [];
+let snapshots = 0;
 const record = (name, args) => {
   for (const value of args) if (typeof value === 'number') assert.ok(Number.isFinite(value), `${name}: finite coordinates`);
   calls.push([name, ...args]);
@@ -19,6 +20,7 @@ canvas.measureText = text => ({ width: text.length * 7 });
 const motion = { matches: false };
 const events = {};
 const context = vm.createContext({ ...appImports,
+  createSceneRenderer: (g, readFrame, document) => appImports.createSceneRenderer(g, () => { snapshots++; return readFrame(); }, document),
   console: { ...console, assert: (value, ...message) => assert.ok(value, message.join(' ')) },
   document: { addEventListener: (name, fn) => events[name] = fn, getElementById: () => ({ getContext: () => canvas, addEventListener() {} }) },
   performance: { now: () => 0 }, matchMedia: () => motion,
@@ -32,7 +34,7 @@ vm.runInContext(source, context);
 vm.runInContext(`
   for (const vertical of [-81, -50, 0, 50, 81]) {
     bendY = vertical; bendX = 170; camX = 291;
-    assert.deepEqual(P(291, 0), [400, HIT_Y], 'judgement line stays fixed');
+    assert.deepEqual(Array.from(P(291, 0)), [400, HIT_Y], 'judgement line stays fixed');
     let previous = P(291, 0)[1];
     for (let d = .05; d <= LOOK; d += .05) {
       const y = P(291, d)[1]; assert.ok(y < previous, 'road must recede monotonically, never curl back'); previous = y;
@@ -538,3 +540,7 @@ await vm.runInContext(`(async () => {
   await openSharedTrack(sourceURL); await button.onclick(); assert.equal(played, 1); assert.equal(sel, 0);
 })()`, context);
 console.log('ok: Audius-only share URLs, resolver validation, unavailable tracks, import completion/errors, deduplication, cancel and cached playback');
+
+const beforeSnapshots = snapshots;
+vm.runInContext("mode = 'title'; scene.renderScene(1, false)", context);
+assert.equal(snapshots - beforeSnapshots, 1, 'one frame snapshot, including nested menu text calls');

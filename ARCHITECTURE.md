@@ -14,10 +14,15 @@ Lockstep is still a static site. `index.html` loads `app.js` as a native JavaScr
 | Beat positions and difficulty thinning | `lib/beat-grid.js` | `timing.test.mjs`, `performance.test.mjs` |
 | Stored chart, PCM and tempo data types | `lib/song.ts` | `npm run typecheck` |
 | Native controls and page layout | `index.html`, `styles.css` | `touch.test.mjs` |
-| Screen flow, current run state, input, Canvas drawing and playback coordination | `app.js` | renderer, touch, materials and performance tests |
+| Playback coordination and screen composition | `app.js` | renderer, touch, materials and performance tests |
 | Stem separation and worker messages | `separator.js`, `vendor/demucs-web/processor.js` | separation and audit tests |
 | Automatic note chart generation | `analyze.js` | `analyze.test.mjs` |
 | GPU materials | `shader-renderer.js`, `theme-shaders.js`, `liquid-shader.js` | shader and materials tests |
+
+| Keyboard/touch action meanings | `lib/input-actions.js` | `input-actions.test.mjs` |
+| Scoring, captures, misses and track selection | `lib/gameplay.js` | `gameplay.test.mjs` |
+| Catalog selection, Audius requests and search state | `lib/song-menu.js`, `lib/audius.js` | `menu-flow.test.mjs` |
+| Canvas backdrop, highway/effects and HUD | `lib/scene-renderer.js` | render, materials and performance tests |
 
 ## Module rules
 
@@ -26,6 +31,8 @@ Lockstep is still a static site. `index.html` loads `app.js` as a native JavaScr
 - The audio engine owns its master/echo graph and transient synthesized sounds. The app owns the AudioContext, pause/resume, and absolute scheduling times. Sound methods take times in audio-clock seconds; `stopSounds()` disconnects temporary graphs but preserves the reusable master graph. The stem players connect to `audio.output`.
 - Each stem player owns one group of recorded sources and gains. Gameplay and preview use separate players. Starting a group replaces the previous group; stopping or natural completion releases nodes. The app supplies loop bounds and scheduling times, and still owns pause/resume of the shared context.
 - Timing modules are pure calculations. They receive the beat grid or tempo segments explicitly and never read an audio context, DOM node or global game state. Time is measured in seconds.
+- The renderer reads a frame snapshot and owns only drawing resources. Animation state advances in the app; scoring and track mutations belong to gameplay rules. Menu/results overlays are composition callbacks.
+- Input adapters translate browser events into actions before dispatch. Song-menu state preserves selection across catalog rebuilds; Audius search discards stale responses.
 - `app.js` coordinates these modules. Song storage and timing must not import the app or renderer.
 - Stored PCM is signed 16-bit stereo at 44.1 kHz, in chart-track order. Separation still runs on float audio in its worker. Do not retain both full representations on the main thread.
 
