@@ -1,3 +1,9 @@
+import { createSongMenu, createTrackDialog } from "./lib/song-menu.js";
+import {
+  audiusURL,
+  createAudiusClient,
+  createTrackSearch,
+} from "./lib/audius.js";
 import {
   createRunState,
   applyGroove,
@@ -97,7 +103,7 @@ function applyTheme(e) {
   prepareThemeShader();
 }
 function chooseTheme(useAsDefault = false) {
-  const e = catalog[sel];
+  const e = menu.entries[menu.selected];
   if (!e || e.add || e.find) return;
   const keys = Object.keys(THEMES),
     current = keys.findIndex((key) => THEMES[key] === theme);
@@ -190,8 +196,6 @@ let ac,
   tracks,
   overAt = 0;
 let mode = "title",
-  catalog = [],
-  sel = 0,
   loadErr = "";
 let level = +(globalThis.localStorage?.lockstepLevel ?? 1);
 let offset = +(globalThis.localStorage?.lockstepOffset || 0),
@@ -322,9 +326,9 @@ function reset(menuImage = null) {
 const DEMO = { title: "Demo (synth)" },
   ADD = { title: "Add a file", add: true },
   FIND = { title: "Find on Audius", find: true };
-let library = [],
-  server = [],
-  job = null,
+const songMenu = createSongMenu(DEMO, ADD, FIND);
+const menu = songMenu.state;
+let job = null,
   jobs = [],
   worker,
   delArm = -9,
@@ -406,11 +410,7 @@ function work(msg, transfer = [], onProgress) {
 }
 let toast = { s: "", kind: "ok", at: -9 };
 const say = (s, kind = "ok") => (toast = { s, kind, at: rt }); // kind: ok | info | err
-const rebuild = () => {
-  const was = catalog[sel];
-  catalog = [...library, DEMO, ...server, ADD, FIND];
-  sel = Math.max(0, catalog.indexOf(was));
-};
+const rebuild = () => songMenu.rebuild();
 const songLibrary = createSongLibrary();
 const i2f = (a, o = new Float32Array(a.length)) => {
   for (let i = 0; i < a.length; i++) o[i] = a[i] / 32767;
@@ -426,8 +426,9 @@ function loadSong(e) {
       e,
       decodeSong(e)
         .then((s) => {
-          if (catalog[sel] === e) {
-            for (const other of catalog) if (other !== e) delete other.song;
+          if (menu.entries[menu.selected] === e) {
+            for (const other of menu.entries)
+              if (other !== e) delete other.song;
             e.song = s;
           }
           return s;
@@ -479,7 +480,7 @@ async function decodeSong(e) {
   return s;
 }
 async function start() {
-  const e = catalog[sel];
+  const e = menu.entries[menu.selected];
   if (!e || mode === "loading") return;
   if (e.add) return picker.click();
   clearTimeout(pvTimer);
@@ -527,7 +528,7 @@ let pvT0 = 0,
 const stopPreview = () => previewPlayer?.stop();
 function showSelected() {
   clearTimeout(pvTimer);
-  const e = catalog[sel],
+  const e = menu.entries[menu.selected],
     n = ++pvN;
   if (!e || e.add || e.find) return; // keep whatever is playing behind the add/find buttons
   applyTheme(e);
@@ -562,8 +563,7 @@ const attract = () => {
   return pvFrom + (el % Math.max(1, song.duration - pvFrom));
 };
 const pick = (i) => {
-  if (i >= 0 && i !== sel) {
-    sel = i;
+  if (songMenu.select(i)) {
     delArm = -9;
     titleEntry = null;
     showSelected();
@@ -603,7 +603,7 @@ async function nextJob() {
     checkImportSize(bytes.byteLength);
     job.phase = "decode";
     const id = hex(await crypto.subtle.digest("SHA-256", bytes)).slice(0, 16);
-    const existing = library.find((e) => e.lib === id);
+    const existing = menu.library.find((e) => e.lib === id);
     if (existing) {
       say(`${job.title} is already in your library`, "info");
       j.done?.(existing);
@@ -628,7 +628,7 @@ async function nextJob() {
     );
     navigator.storage?.persist?.(); // ask the browser not to evict the library under storage pressure
     const entry = { title: job.title, url: j.url, lib: id, meta };
-    library.push(entry);
+    menu.library.push(entry);
     rebuild();
     say(`added ${job.title} · ${meta.bpm} BPM`);
     j.done?.(entry);
@@ -649,7 +649,7 @@ async function removeSong(e) {
     stopPreview();
     pvFor = null;
   }
-  library = library.filter((x) => x !== e);
+  menu.library = menu.library.filter((x) => x !== e);
   rebuild();
   showSelected();
   say(`deleted ${e.title}`, "info");
@@ -674,7 +674,7 @@ const libraryReady = songLibrary.available
   ? songLibrary
       .list()
       .then((rows) => {
-        library = rows
+        menu.library = rows
           .sort((a, b) => a.added - b.added)
           .map((r) => ({
             title: r.title,
@@ -683,7 +683,8 @@ const libraryReady = songLibrary.available
             meta: r.song,
           }));
         rebuild();
-        if (library.length && catalog[sel] === DEMO) sel = 0;
+        if (menu.library.length && menu.entries[menu.selected] === DEMO)
+          menu.selected = 0;
         showSelected();
       })
       .catch(() => {})
@@ -691,17 +692,16 @@ const libraryReady = songLibrary.available
 fetch("songs/index.json")
   .then((r) => r.json())
   .then((list) => {
-    server = list;
+    menu.server = list;
     rebuild();
   })
   .catch(() => {}); // no songs/ yet, or file:// — fine
 // Audius: search or browse trending, then queue a track like a dropped file. Tracks are used under the Audius
 // Open Music License (OML), which licenses apps that play Audius audio; we credit the artist and link the track anyway.
-const AUDIUS = "https://api.audius.co/v1/tracks",
-  APP = "app_name=lockstep";
-const au = { q: "", list: [], sel: 0, busy: false, err: "" };
-let auN = 0,
-  auTimer;
+const audius = createAudiusClient((url) => fetch(url));
+const search = createTrackSearch(audius, () => preview());
+const au = search.state;
+let auTimer;
 const peek = globalThis.Audio ? new Audio() : null;
 let peekTimer;
 function preview() {
@@ -711,44 +711,12 @@ function preview() {
   const t = mode === "find" && au.list[au.sel];
   if (!t || !peek) return;
   peekTimer = setTimeout(() => {
-    peek.src = `${AUDIUS}/${t.id}/stream?${APP}#t=${t.preview_start_seconds ?? Math.round(Math.min(30, t.duration * 0.3))}`;
+    peek.src = audius.previewURL(t);
     peek.volume = 0.7;
     peek.play().catch(() => {});
   }, 400);
 }
-function auSearch() {
-  const n = ++auN,
-    q = au.q.trim();
-  au.busy = true;
-  au.err = "";
-  fetch(
-    q
-      ? `${AUDIUS}/search?query=${encodeURIComponent(q)}&limit=50&${APP}`
-      : `${AUDIUS}/trending?limit=50&${APP}`,
-  )
-    .then((r) =>
-      r.ok ? r.json() : Promise.reject(new Error(`Audius said ${r.status}`)),
-    )
-    .then(({ data }) => {
-      if (n !== auN) return;
-      au.busy = false;
-      au.sel = 0; // ≤10 min: separation takes ~20 s and ~40 MB per minute
-      au.list = data.filter(
-        (t) =>
-          t.is_streamable &&
-          t.access?.stream &&
-          t.duration >= 30 &&
-          t.duration <= 600,
-      );
-      preview();
-    })
-    .catch((err) => {
-      if (n === auN) {
-        au.busy = false;
-        au.err = err.message || String(err);
-      }
-    });
-}
+const auSearch = () => search.search();
 function findKey(e) {
   const t = au.list[au.sel];
   if (e.key === "Escape") {
@@ -777,21 +745,6 @@ function findKey(e) {
   preview();
 }
 // Share only Audius provenance; no audio or local filenames leave this device.
-function audiusURL(value) {
-  try {
-    const u = new URL(value);
-    return u.protocol === "https:" &&
-      u.hostname === "audius.co" &&
-      !u.port &&
-      !u.username &&
-      !u.password &&
-      /^\/[^/]+\/[^/]+\/?$/.test(u.pathname)
-      ? u.origin + u.pathname.replace(/\/$/, "")
-      : null;
-  } catch {
-    return null;
-  }
-}
 function shareLink(e) {
   const track = audiusURL(e?.url);
   if (!track) return null;
@@ -801,22 +754,8 @@ function shareLink(e) {
   u.searchParams.set("audius", track);
   return u.href;
 }
-function trackDialog(title, message) {
-  const d = document.createElement("dialog"),
-    heading = document.createElement("h2"),
-    status = document.createElement("p"),
-    close = document.createElement("button");
-  heading.textContent = title;
-  status.textContent = message;
-  status.setAttribute("role", "status");
-  close.textContent = "Close";
-  close.onclick = () => d.close();
-  d.onclose = () => d.remove();
-  d.append(heading, status, close);
-  document.body.append(d);
-  d.showModal();
-  return { d, status, close };
-}
+const trackDialog = (title, message) =>
+  createTrackDialog(document, title, message);
 async function shareTrack(e) {
   const url = shareLink(e);
   if (!url) return;
@@ -843,37 +782,11 @@ function queueAudius(t, done, failed) {
     url: audiusURL(`https://audius.co${t.permalink}`),
     done,
     failed,
-    bytes: () =>
-      fetch(`${AUDIUS}/${encodeURIComponent(t.id)}/stream?${APP}`).then(
-        importBytes,
-      ),
+    bytes: () => audius.download(t.id),
   });
   if (!job) nextJob();
 }
-async function resolveSharedTrack(value) {
-  const url = audiusURL(value);
-  if (!url) throw new Error("This is not an Audius track link.");
-  const r = await fetch(
-    `https://api.audius.co/v1/resolve?url=${encodeURIComponent(url)}&${APP}`,
-  );
-  if (!r.ok) throw new Error(`Audius could not find this track (${r.status}).`);
-  const { data } = await r.json(),
-    t = Array.isArray(data) ? data[0] : data;
-  if (
-    !t ||
-    typeof t.id !== "string" ||
-    !/^[a-zA-Z0-9]+$/.test(t.id) ||
-    !t.title ||
-    !t.user?.name ||
-    !audiusURL(`https://audius.co${t.permalink}`)
-  )
-    throw new Error("This link does not resolve to a track.");
-  if (!t.is_streamable || !t.access?.stream)
-    throw new Error("This track is no longer available to stream.");
-  if (!(t.duration >= 30 && t.duration <= 600))
-    throw new Error("Tracks must be between 30 seconds and 10 minutes.");
-  return t;
-}
+const resolveSharedTrack = (value) => audius.resolve(value);
 async function openSharedTrack(value) {
   const { d, status, close } = trackDialog(
     "Shared track",
@@ -898,7 +811,7 @@ async function openSharedTrack(value) {
         pvN++;
         status.textContent = "Preparing track…";
         const url = audiusURL(`https://audius.co${t.permalink}`);
-        let entry = library.find((e) => audiusURL(e.url) === url);
+        let entry = menu.library.find((e) => audiusURL(e.url) === url);
         if (!entry) {
           timer = setInterval(() => {
             if (d.open)
@@ -911,7 +824,7 @@ async function openSharedTrack(value) {
           );
         }
         if (!d.open) return; // Closing leaves the import running, but cancels automatic playback.
-        sel = catalog.indexOf(entry);
+        menu.selected = menu.entries.indexOf(entry);
         d.close();
         if (!document.hidden) await start();
         else {
@@ -1039,7 +952,10 @@ function dispatchAction(action) {
       setLevel(level + action.delta);
       break;
     case "select":
-      pick((sel + action.delta + catalog.length) % catalog.length);
+      pick(
+        (menu.selected + action.delta + menu.entries.length) %
+          menu.entries.length,
+      );
       break;
     case "start":
       start();
@@ -1048,30 +964,30 @@ function dispatchAction(action) {
       chooseTheme(action.useAsDefault);
       break;
     case "share":
-      shareTrack(catalog[sel]);
+      shareTrack(menu.entries[menu.selected]);
       break;
     case "files":
       picker.click();
       break;
     case "find":
-      pick(catalog.indexOf(FIND));
+      pick(menu.entries.indexOf(FIND));
       start();
       break;
     case "help":
       help = true;
       break;
     case "delete":
-      if (!catalog[sel].lib) break;
+      if (!menu.entries[menu.selected].lib) break;
       if (rt - delArm < 2) {
         delArm = -9;
-        removeSong(catalog[sel]);
+        removeSong(menu.entries[menu.selected]);
       } else {
         delArm = rt;
         const key = action.key === "x" ? "X" : action.key;
         say(
           touchEnabled
-            ? `tap Delete song again to delete ${catalog[sel].title}`
-            : `press ${key} again to delete ${catalog[sel].title}`,
+            ? `tap Delete song again to delete ${menu.entries[menu.selected].title}`
+            : `press ${key} again to delete ${menu.entries[menu.selected].title}`,
           "info",
         );
       }
@@ -1147,10 +1063,10 @@ function bindTouchPad(button) {
 function updateTouchControls() {
   if (!touchEnabled) return;
   const songSelect = document.getElementById("touch-song");
-  if (touchCatalog !== catalog) {
-    touchCatalog = catalog;
+  if (touchCatalog !== menu.entries) {
+    touchCatalog = menu.entries;
     songSelect.replaceChildren(
-      ...catalog.map((e, i) => {
+      ...menu.entries.map((e, i) => {
         const option = document.createElement("option");
         option.value = i;
         option.textContent = e.title;
@@ -1160,7 +1076,7 @@ function updateTouchControls() {
   }
   const state = [
     mode,
-    sel,
+    menu.selected,
     level,
     theme.name,
     offset,
@@ -1178,14 +1094,14 @@ function updateTouchControls() {
   }
   for (const group of touchDock.querySelectorAll("[data-screen]"))
     group.hidden = !group.dataset.screen.split(" ").includes(mode);
-  songSelect.value = String(sel);
+  songSelect.value = String(menu.selected);
   document.getElementById("touch-level").value = String(level);
   document.getElementById("touch-theme").textContent = `Theme: ${theme.name}`;
   document.getElementById("touch-share").disabled = !audiusURL(
-    catalog[sel]?.url,
+    menu.entries[menu.selected]?.url,
   );
   document.getElementById("touch-delete").disabled =
-    mode !== "title" || !catalog[sel]?.lib;
+    mode !== "title" || !menu.entries[menu.selected]?.lib;
   document.getElementById("touch-default").disabled = mode !== "title";
   document.getElementById("touch-offset").textContent =
     `Audio offset: ${Math.round(offset * 1000)} ms`;
@@ -2816,7 +2732,7 @@ function drawTitle() {
   drawToast();
   g.fillStyle = "rgba(0,0,0,.55)";
   g.fillRect(0, H - 34, W, 34);
-  const e = catalog[sel],
+  const e = menu.entries[menu.selected],
     y = H - 13;
   let x = 34;
   const hint = (k, s) => {
@@ -2842,20 +2758,24 @@ const LIST = { x: 32, y: 128, w: 372, h: 350 };
 function drawList() {
   const rows = [
     { hdr: "YOUR LIBRARY" },
-    ...library.map((e) => ({ e })),
+    ...menu.library.map((e) => ({ e })),
     ...(job ? [{ j: job }] : []),
     ...jobs.map((q) => ({ j: { title: q.title, phase: "queued" } })),
   ];
-  if (!library.length && !job)
+  if (!menu.library.length && !job)
     rows.push({ note: "empty for now: add a file or find one on Audius" });
-  rows.push({ hdr: "BUILT IN" }, { e: DEMO }, ...server.map((e) => ({ e })));
+  rows.push(
+    { hdr: "BUILT IN" },
+    { e: DEMO },
+    ...menu.server.map((e) => ({ e })),
+  );
   let total = 0;
   for (const r of rows) {
     r.y = total;
     r.h = r.hdr ? 28 : r.j ? 40 : 32;
     total += r.h;
   }
-  const at = rows.find((r) => r.e === catalog[sel]);
+  const at = rows.find((r) => r.e === menu.entries[menu.selected]);
   if (at)
     listScroll +=
       (Math.max(0, Math.min(total - LIST.h, at.y + at.h / 2 - LIST.h / 2)) -
@@ -2917,7 +2837,7 @@ function drawList() {
         box(L + 14, y + 28, (R - L - 24) * p, 3, 1.5, `hsl(${hue},90%,72%)`);
     } else {
       const e = r.e,
-        on = e === catalog[sel],
+        on = e === menu.entries[menu.selected],
         a = about(e),
         f = `${on ? 800 : 500} 15px ${SANS}`,
         mf = `500 11px ${MONO}`;
@@ -2941,7 +2861,7 @@ function drawList() {
         );
       if (a.dur)
         text(mmss(a.dur), R - 10, y + 21, mf, "rgba(255,255,255,.4)", "right");
-      const i = catalog.indexOf(e);
+      const i = menu.entries.indexOf(e);
       zone(
         L,
         Math.max(LIST.y, y),
@@ -2959,7 +2879,7 @@ function drawList() {
     const w = (LIST.w - 10) / 2,
       x = LIST.x + n * (w + 10),
       y = LIST.y + LIST.h + 14,
-      on = catalog[sel] === e;
+      on = menu.entries[menu.selected] === e;
     box(
       x,
       y,
@@ -2978,7 +2898,7 @@ function drawList() {
       "left",
     );
     zone(x, y, w, 36, () => {
-      pick(catalog.indexOf(e));
+      pick(menu.entries.indexOf(e));
       start();
     });
   });
@@ -3112,7 +3032,7 @@ function drawSleeve(source, x, y, w, h, active) {
 const CARD = { x: 428, y: 128, w: 340, h: 400 };
 function drawCard() {
   const { x, y, w, h } = CARD,
-    e = catalog[sel],
+    e = menu.entries[menu.selected],
     L = x + 22,
     R = x + w - 22;
   box(x, y, w, h, 14, "rgba(20,12,34,.8)", "rgba(255,255,255,.12)");
@@ -3592,7 +3512,7 @@ function drawResults() {
 setGrid(song);
 tracks = buildTracks();
 rebuild();
-applyTheme(catalog[sel]);
+applyTheme(menu.entries[menu.selected]);
 requestAnimationFrame(frame);
 // Self-check: every phrase of every demo chart has notes, no step is doubled, and the grid maps times to bars.
 ["drums", "bass", "arp", "lead"].forEach((k, i) => {
