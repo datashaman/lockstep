@@ -1,23 +1,9 @@
 import assert from 'node:assert/strict';
 import { appSource, appImports } from './test/app-harness.mjs';
 import vm from 'node:vm';
+import { createAudioHarness } from './test/audio-context.mjs';
 const source = appSource;
-const nodes = [];
-const param = () => ({ value: 0, setValueAtTime() {}, setTargetAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {} });
-class Node {
-  constructor() { nodes.push(this); this.edges = new Set(); for (const p of ['gain', 'frequency', 'detune', 'Q', 'delayTime', 'threshold', 'ratio', 'playbackRate']) this[p] = param(); }
-  connect(target) { this.edges.add(target); return target; }
-  disconnect() { this.edges.clear(); }
-  start() {}
-  stop() { this.stopped = true; }
-}
-class AudioContext {
-  currentTime = 0; sampleRate = 44100; state = 'running'; destination = {};
-  createGain() { return new Node(); } createBufferSource() { return new Node(); }
-  createOscillator() { return new Node(); } createBiquadFilter() { return new Node(); }
-  createDelay() { return new Node(); } createDynamicsCompressor() { return new Node(); }
-  createBuffer(channels, length) { return { getChannelData: () => new Float32Array(length), copyToChannel() {} }; }
-}
+const { AudioContext, countEdges } = createAudioHarness();
 const gradient = { addColorStop() {} };
 const g = new Proxy({}, { get: (o, k) => o[k] ?? (k === 'measureText' ? s => ({ width: s.length * 7 }) : k.startsWith('create') ? () => gradient : () => {}), set: (o, k, v) => (o[k] = v, true) });
 const timers = new Map(); let timerId = 0;
@@ -25,7 +11,7 @@ const context = vm.createContext({ ...appImports, assert, AudioContext, console,
   document: { getElementById: () => ({ getContext: () => g, addEventListener() {} }) },
   addEventListener() {}, requestAnimationFrame() {}, fetch: () => Promise.reject(new Error('offline')),
   setTimeout: fn => { timers.set(++timerId, fn); return timerId; }, clearTimeout: id => timers.delete(id),
-  countEdges: () => nodes.reduce((sum, n) => sum + n.edges.size, 0),
+  countEdges,
 });
 vm.runInContext(source, context);
 vm.runInContext(`
@@ -54,16 +40,7 @@ vm.runInContext(`
 
 `, context);
 
-vm.runInContext(`
-  stopStems(); stopVoices(); const soundBaseline = countEdges();
-  for (let i = 0; i < 20; i++) {
-    tone('sine', 60, 0, .1, .1, 1000, .5); hiss(0, .1, .1, 1000); pad(0, 0); captureSfx(0);
-    stopVoices(); assert.equal(countEdges(), soundBaseline, 'temporary sound graphs disconnected');
-  }
-`, context);
-vm.runInContext("tone('sine', 60, 0, .1, .1, 1000, .5)", context);
-for (const node of nodes) node.onended?.();
-vm.runInContext("assert.equal(voices.size, 0); assert.equal(countEdges(), soundBaseline, 'natural sound completion disconnects graph')", context);
+vm.runInContext('stopStems(); audio.stopSounds()', context);
 // Start/preview requests share decoding, and a late request cannot repopulate stale caches.
 vm.runInContext(`
   const originalDecode = decodeSong; const resolvers = new Map(); let decodes = 0;
@@ -101,7 +78,7 @@ for (let i = 0; i < 20; i++) {
   await timers.get(timerId)();
   vm.runInContext('stopPreview(); assert.equal(countEdges(), previewBaseline)', context);
 }
-console.log('ok: 20 replay/preview/synth cycles, natural node cleanup, shared decoding, stale-cache eviction and idle worker release');
+console.log('ok: 20 replay/preview cycles, shared decoding, stale-cache eviction and idle worker release');
 
 vm.runInContext(`
   const channel = new Float32Array(4);

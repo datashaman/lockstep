@@ -1,3 +1,4 @@
+import { createAudioEngine } from "./lib/audio-engine.js";
 import { songPosition, audioElapsed } from "./lib/transport.js";
 import {
   extendBeatGrid,
@@ -169,9 +170,7 @@ const demoSong = () => ({
 
 // ---------- state ----------
 let ac,
-  noise,
-  out,
-  send,
+  audio,
   t0,
   sched,
   song = demoSong(),
@@ -216,7 +215,6 @@ let groove = 100,
   missStreak = 0,
   failedAt = 0;
 let tempo = [{ at: 0, pos: 0, rate: 1 }];
-const voices = new Map();
 let parts = [],
   pops = [],
   rings = [],
@@ -258,34 +256,11 @@ function changeGroove(amount) {
     inSync = false;
     entrance = null;
     stopStems();
-    stopVoices();
-    out?.gain.setTargetAtTime(0, ac.currentTime, 0.02);
+    audio?.stopSounds();
+    audio?.mute();
     return;
   }
   setTempo(groove >= 40 ? 1 : 0.55 + (0.45 * groove) / 40);
-}
-function voice(node, ...graph) {
-  const cleanup = () => {
-    node.disconnect();
-    for (const part of graph) part?.disconnect();
-    voices.delete(node);
-    node.onended = null;
-  };
-  voices.set(node, cleanup);
-  node.onended = cleanup;
-  return node;
-}
-function stopVoices() {
-  for (const [node, cleanup] of voices) {
-    node.stop();
-    cleanup();
-  }
-}
-function restoreVolume() {
-  if (out) {
-    out.gain.cancelScheduledValues(ac.currentTime);
-    out.gain.setValueAtTime(0.8, ac.currentTime);
-  }
 }
 const auto = (tr, n) => n.bar >= tr.capFrom && n.bar < tr.capTo;
 const locked = (tr, t) => bar(t) < tr.capTo;
@@ -375,8 +350,8 @@ function reset(menuImage = null) {
   groove = 100;
   missStreak = 0;
   tempo = [{ at: 0, pos: 0, rate: 1 }];
-  stopVoices();
-  restoreVolume();
+  audio?.stopSounds();
+  audio?.restoreVolume();
   t0 = ac.currentTime + LEAD_IN;
   sched = -LEAD_IN;
   stopStems();
@@ -391,7 +366,7 @@ function reset(menuImage = null) {
       };
       s.buffer = song.buffers[i];
       v.gain.value = 0;
-      s.connect(v).connect(out);
+      s.connect(v).connect(audio.output);
       s.start(t0);
       srcs.push(s);
       tr.gain = v;
@@ -591,8 +566,8 @@ function toTitle() {
   inSync = false;
   entrance = null;
   stopStems();
-  stopVoices();
-  restoreVolume();
+  audio?.stopSounds();
+  audio?.restoreVolume();
   mode = "title";
   showSelected();
 }
@@ -633,7 +608,7 @@ function showSelected() {
       if (!ac || !song.buffers) return;
       const v = (pvGain = ac.createGain());
       v.gain.value = 0.35;
-      v.connect(out);
+      v.connect(audio.output);
       pvT0 = ac.currentTime + 0.05;
       for (const b of song.buffers) {
         const src = ac.createBufferSource();
@@ -1037,127 +1012,14 @@ if (globalThis.location) {
   if (shared) Promise.resolve().then(() => openSharedTrack(shared));
 }
 
-// ---------- audio ----------
-const hz = (m) => 440 * 2 ** ((m - 69) / 12);
+// The audio clock stays in the app; synthesis and graph ownership stay in the engine.
 function initAudio() {
   ac = new AudioContext();
-  noise = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
-  noise.getChannelData(0).forEach((_, i, a) => (a[i] = Math.random() * 2 - 1));
-  const comp = ac.createDynamicsCompressor();
-  comp.threshold.value = -14;
-  comp.ratio.value = 4;
-  comp.connect(ac.destination);
-  out = ac.createGain();
-  out.gain.value = 0.8;
-  out.connect(comp);
-  // dotted-eighth feedback echo for arp / lead / stingers
-  send = ac.createDelay(1);
-  send.delayTime.value = 3 * STEP;
-  const fb = ac.createGain(),
-    lp = ac.createBiquadFilter(),
-    wet = ac.createGain();
-  fb.gain.value = 0.38;
-  lp.frequency.value = 2200;
-  wet.gain.value = 0.35;
-  send.connect(lp).connect(fb).connect(send);
-  lp.connect(wet).connect(out);
-}
-function tone(type, midi, when, dur, vol, cutoff = 8000, echo = 0) {
-  const o = ac.createOscillator(),
-    v = ac.createGain(),
-    f = ac.createBiquadFilter();
-  o.type = type;
-  o.frequency.value = hz(midi);
-  f.frequency.value = cutoff;
-  v.gain.setValueAtTime(vol, when);
-  v.gain.exponentialRampToValueAtTime(1e-4, when + dur);
-  o.connect(f).connect(v).connect(out);
-  o.start(when);
-  o.stop(when + dur);
-  let echoSend;
-  if (echo) {
-    echoSend = ac.createGain();
-    echoSend.gain.value = echo;
-    v.connect(echoSend).connect(send);
-  }
-  voice(o, v, f, echoSend);
-}
-function hiss(when, dur, vol, hp) {
-  const s = ac.createBufferSource(),
-    v = ac.createGain(),
-    f = ac.createBiquadFilter();
-  s.buffer = noise;
-  f.type = "highpass";
-  f.frequency.value = hp;
-  v.gain.setValueAtTime(vol, when);
-  v.gain.exponentialRampToValueAtTime(1e-4, when + dur);
-  s.connect(f).connect(v).connect(out);
-  s.start(when);
-  s.stop(when + dur);
-  voice(s, v, f);
-}
-function pad(b, when) {
-  // soft detuned chord bed so the song is never silent
-  for (const m of CHORDS[b % 4])
-    for (const det of [-8, 8]) {
-      const o = ac.createOscillator(),
-        v = ac.createGain(),
-        f = ac.createBiquadFilter();
-      o.type = "sawtooth";
-      o.frequency.value = hz(m);
-      o.detune.value = det;
-      f.frequency.value = 900;
-      v.gain.setValueAtTime(1e-4, when);
-      v.gain.exponentialRampToValueAtTime(0.02, when + 0.4);
-      v.gain.setValueAtTime(0.02, when + BARLEN - 0.3);
-      v.gain.exponentialRampToValueAtTime(1e-4, when + BARLEN + 0.2);
-      o.connect(f).connect(v).connect(out);
-      o.start(when);
-      o.stop(when + BARLEN + 0.25);
-      voice(o, v, f);
-    }
-}
-function play(kind, lane, b, when) {
-  const ch = CHORDS[b % 4];
-  if (kind === "drums") {
-    if (lane === 0) {
-      const o = ac.createOscillator(),
-        v = ac.createGain();
-      o.frequency.setValueAtTime(150, when);
-      o.frequency.exponentialRampToValueAtTime(40, when + 0.15);
-      v.gain.setValueAtTime(0.9, when);
-      v.gain.exponentialRampToValueAtTime(1e-4, when + 0.2);
-      o.connect(v).connect(out);
-      o.start(when);
-      o.stop(when + 0.2);
-      voice(o, v);
-    } else if (lane === 1) hiss(when, 0.15, 0.5, 1200);
-    else hiss(when, 0.05, 0.25, 7000);
-  } else if (kind === "bass")
-    tone("sawtooth", ch[lane] - 24, when, 0.22, 0.35, 700);
-  else if (kind === "arp")
-    tone("square", ch[lane] + 12, when, 0.12, 0.08, 8000, 0.4);
-  else tone("sawtooth", ch[lane] + 12, when, 0.35, 0.15, 2400, 0.5);
-}
-function captureSfx(b) {
-  const at = ac.currentTime;
-  CHORDS[b % 4].forEach((m, k) =>
-    tone("triangle", m + 24, at + k * 0.06, 0.5, 0.12, 8000, 0.6),
-  );
-  const s = ac.createBufferSource(),
-    f = ac.createBiquadFilter(),
-    v = ac.createGain();
-  s.buffer = noise;
-  f.type = "bandpass";
-  f.Q.value = 4;
-  f.frequency.setValueAtTime(300, at);
-  f.frequency.exponentialRampToValueAtTime(8000, at + 0.6);
-  v.gain.setValueAtTime(0.25, at);
-  v.gain.exponentialRampToValueAtTime(1e-4, at + 0.7);
-  s.connect(f).connect(v).connect(out);
-  s.start(at);
-  s.stop(at + 0.7);
-  voice(s, v, f);
+  audio = createAudioEngine(ac, {
+    step: STEP,
+    barLength: BARLEN,
+    chords: CHORDS,
+  });
 }
 
 // ---------- fx (x is in hit-plane world space: screen x = W/2 + x - camX) ----------
@@ -1193,7 +1055,7 @@ function move(dir) {
   const j = next(dir);
   if (j < 0) return;
   dash = { from: craftX(), to: trackX(j), at: rt };
-  hiss(ac.currentTime, 0.12, 0.06, 3000);
+  audio.playSwitch(ac.currentTime);
   tracks[cur].live = false;
   cur = j;
 }
@@ -1230,7 +1092,7 @@ function tryHit(lane) {
   tr.live = true;
   missStreak = 0;
   changeGroove(perfect ? 3 : 2);
-  if (song.synth) play(tr.kind, lane, n.bar, ac.currentTime);
+  if (song.synth) audio.playNote(tr.kind, lane, n.bar, ac.currentTime);
   burst(x, HIT_Y, tr.color, perfect ? 18 : 9, 1);
   laneHit[cur * 3 + lane] = rt;
   popup(
@@ -1258,7 +1120,7 @@ function tryHit(lane) {
     rings.push({ x: cx, born: rt, color: tr.color });
     shake = 12;
     flash = { color: tr.color, born: rt };
-    captureSfx(n.bar); // stay put: the arrows show where you can go next
+    audio.playCapture(n.bar); // stay put: the arrows show where you can go next
   }
 }
 
@@ -1606,7 +1468,7 @@ function logic(t) {
   for (const bt of beats) {
     if (bt >= 0) break;
     if (bt >= sched && bt < upto && bt >= -LEAD_IN)
-      tone("square", 84, audioTime(bt), 0.06, 0.05);
+      audio.playCountIn(audioTime(bt));
   } // count-in
   if (song.synth) {
     for (
@@ -1614,9 +1476,9 @@ function logic(t) {
       s < upto && s < end;
       s += 2 * STEP
     )
-      if (s >= 0) hiss(audioTime(s), 0.03, 0.05, 9000);
+      if (s >= 0) audio.playHiHat(audioTime(s));
     for (let b = Math.ceil(sched / BARLEN); b * BARLEN < upto && b < BARS; b++)
-      if (b >= 0) pad(b, audioTime(b * BARLEN));
+      if (b >= 0) audio.playPad(b, audioTime(b * BARLEN));
   }
   for (const tr of tracks) {
     if (song.synth)
@@ -1626,7 +1488,7 @@ function logic(t) {
         k++
       ) {
         const n = tr.notes[k];
-        if (auto(tr, n)) play(tr.kind, n.lane, n.bar, audioTime(n.t));
+        if (auto(tr, n)) audio.playNote(tr.kind, n.lane, n.bar, audioTime(n.t));
       }
     const judgedAt = audioTime(t);
     while (tr.judged < tr.notes.length) {
