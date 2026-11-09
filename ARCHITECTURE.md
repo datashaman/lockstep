@@ -35,6 +35,8 @@ npm run format:check
 python3 prep_test.py
 ```
 
+GitHub Actions runs these checks on pull requests and pushes to `main`, using Node 24 and Python 3.13. The workflow uses commit-pinned official actions and a read-only repository token.
+
 `lib/song.ts` defines shared data shapes. The modules in `lib/` use JSDoc references to those types and are checked with strict TypeScript. JavaScript remains the browser's source, so there is no generated directory to keep synchronized. `app.js` and the older renderer/worker files are not yet fully type-checked.
 
 Run `npm run format` after changing the entry point, page, styles or library modules. Readability is intentional: expand state transitions into steps and prefer descriptive names over reducing line count.
