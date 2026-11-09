@@ -212,7 +212,7 @@ export class DemucsProcessor {
 
     const totalSamples = leftChannel.length;
     const stride = Math.floor(TRAINING_SAMPLES * (1 - SEGMENT_OVERLAP));
-    const numSegments = Math.ceil((totalSamples - TRAINING_SAMPLES) / stride) + 1;
+    const numSegments = Math.ceil(totalSamples / stride);
 
     const outputs = TRACKS.map(() => ({
       left: new Float32Array(totalSamples),

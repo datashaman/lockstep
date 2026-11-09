@@ -268,10 +268,20 @@ const rebuild = () => { const was = catalog[sel]; catalog = [...library, DEMO, .
 const dbp = globalThis.indexedDB && new Promise((ok, no) => { const r = indexedDB.open('lockstep', 1);
   r.onupgradeneeded = () => { r.result.createObjectStore('songs', { keyPath: 'id' }); r.result.createObjectStore('pcm'); }; // pcm kept apart so listing stays cheap
   r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
-const idb = async (store, op, ...args) => { const d = await dbp; return new Promise((ok, no) => {
-  const q = d.transaction(store, op.startsWith('get') ? 'readonly' : 'readwrite').objectStore(store)[op](...args);
-  q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error); }); };
-const f2i = a => { const o = new Int16Array(a.length); for (let i = 0; i < a.length; i++) o[i] = Math.max(-1, Math.min(1, a[i])) * 32767; return o; };
+const dbTransaction = async (stores, mode, run) => { const d = await dbp; return new Promise((ok, no) => {
+  const tx = d.transaction(stores, mode); let result;
+  tx.oncomplete = () => ok(result?.result);
+  tx.onabort = () => no(tx.error || new Error('Library transaction aborted'));
+  tx.onerror = () => {}; // abort reports the transaction failure
+  try { result = run(tx); } catch (err) { tx.abort(); no(err); }
+}); };
+const idb = (store, op, ...args) => dbTransaction(store, op.startsWith('get') ? 'readonly' : 'readwrite', tx => tx.objectStore(store)[op](...args));
+const saveSong = (row, pcm) => dbTransaction(['songs', 'pcm'], 'readwrite', tx => {
+  tx.objectStore('pcm').put(pcm, row.id); tx.objectStore('songs').put(row);
+});
+const deleteSong = id => dbTransaction(['songs', 'pcm'], 'readwrite', tx => {
+  tx.objectStore('pcm').delete(id); tx.objectStore('songs').delete(id);
+});
 const i2f = (a, o = new Float32Array(a.length)) => { for (let i = 0; i < a.length; i++) o[i] = a[i] / 32767; return o; };
 const hex = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
 
@@ -342,9 +352,32 @@ const pick = i => { if (i >= 0 && i !== sel) { sel = i; delArm = -9; titleEntry 
 function setLevel(lv) { level = Math.max(0, Math.min(2, lv)); if (globalThis.localStorage) localStorage.lockstepLevel = level; setGrid(song); tracks = buildTracks(); }
 
 // Add songs: decode -> separate + chart in a worker (separator.js) -> store stems as 16-bit PCM in IndexedDB.
+const MAX_IMPORT_BYTES = 64 * 1024 * 1024, MAX_IMPORT_SECONDS = 600;
+function checkImportSize(size) { if (size > MAX_IMPORT_BYTES) throw new Error('Audio files must be 64 MiB or smaller.'); }
+function checkImportDuration(duration) {
+  if (!Number.isFinite(duration) || duration < 1 || duration > MAX_IMPORT_SECONDS) throw new Error('Audio must be between 1 second and 10 minutes.');
+}
+async function importBytes(response) {
+  if (!response.ok) throw new Error(`Audius stream ${response.status}`);
+  const reader = response.body.getReader(), chunks = []; let size = 0;
+  try {
+    checkImportSize(Number(response.headers.get('content-length')));
+    for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength; checkImportSize(size); chunks.push(value); }
+    return await new Blob(chunks).arrayBuffer();
+  } finally { await reader.cancel(); reader.releaseLock(); }
+}
+function importDuration(bytes) {
+  return new Promise((resolve, reject) => {
+    const audio = document.createElement('audio'), url = URL.createObjectURL(new Blob([bytes]));
+    const finish = (err) => { clearTimeout(timer); audio.onloadedmetadata = audio.onerror = null; audio.removeAttribute('src'); audio.load(); URL.revokeObjectURL(url); err ? reject(err) : resolve(); };
+    const timer = setTimeout(() => finish(new Error('Could not read audio duration.')), 15000);
+    audio.preload = 'metadata'; audio.onloadedmetadata = () => { try { checkImportDuration(audio.duration); finish(); } catch (err) { finish(err); } };
+    audio.onerror = () => finish(new Error('Could not read audio duration.')); audio.src = url;
+  });
+}
 const AUDIO = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|aiff?|webm)$/i;
 function addFiles(files) {
-  for (const f of files) if (f.type.startsWith('audio/') || AUDIO.test(f.name)) jobs.push({ title: f.name.replace(/\.[^.]+$/, ''), bytes: () => f.arrayBuffer() });
+  for (const f of files) if (f.type.startsWith('audio/') || AUDIO.test(f.name)) jobs.push({ title: f.name.replace(/\.[^.]+$/, ''), bytes: () => { checkImportSize(f.size); return f.arrayBuffer(); } });
     else say(`${f.name} isn't an audio file`, 'err');
   if (!job) nextJob();
 }
@@ -352,16 +385,18 @@ async function nextJob() {
   const j = jobs.shift(); if (!j) { job = null; releaseWorker(); return; } // j: { title, bytes: () => Promise<ArrayBuffer>, url? (where it came from) }
   job = { title: j.title, phase: j.url ? 'download' : 'decode', progress: 0 };
   try {
-    const bytes = await j.bytes(); job.phase = 'decode';
+    let bytes = await j.bytes(); checkImportSize(bytes.byteLength); job.phase = 'decode';
     const id = hex(await crypto.subtle.digest('SHA-256', bytes)).slice(0, 16);
     const existing = library.find(e => e.lib === id);
     if (existing) { say(`${job.title} is already in your library`, 'info'); j.done?.(existing); return nextJob(); }
-    const ab = await new OfflineAudioContext(2, 1, 44100).decodeAudioData(bytes); // resamples to the model's 44.1 kHz
+    await importDuration(bytes);
+    let ab = await new OfflineAudioContext(2, 1, 44100).decodeAudioData(bytes); // resamples to the model's 44.1 kHz
+    checkImportDuration(ab.duration);
     const left = ab.getChannelData(0).slice(), right = ab.getChannelData(ab.numberOfChannels > 1 ? 1 : 0).slice();
-    const { song: meta, stems } = await work({ id, left, right }, [left.buffer, right.buffer], d => Object.assign(job, d));
+    ab = null; bytes = null; // Release decoded/compressed input before waiting for separation.
+    const { song: meta, pcm } = await work({ id, left, right }, [left.buffer, right.buffer], d => Object.assign(job, d));
     job.phase = 'save';
-    await idb('pcm', 'put', meta.tracks.map(tr => [f2i(stems[tr.stem].left), f2i(stems[tr.stem].right)]), id);
-    await idb('songs', 'put', { id, title: job.title, url: j.url, song: meta, added: Date.now() });
+    await saveSong({ id, title: job.title, url: j.url, song: meta, added: Date.now() }, pcm);
     navigator.storage?.persist?.(); // ask the browser not to evict the library under storage pressure
     const entry = { title: job.title, url: j.url, lib: id, meta };
     library.push(entry); rebuild(); say(`added ${job.title} · ${meta.bpm} BPM`); j.done?.(entry);
@@ -369,7 +404,7 @@ async function nextJob() {
   nextJob();
 }
 async function removeSong(e) {
-  await idb('pcm', 'delete', e.lib); await idb('songs', 'delete', e.lib);
+  try { await deleteSong(e.lib); } catch (err) { say(`could not delete: ${err.message || err}`, 'err'); return; }
   if (pvFor === e) { stopPreview(); pvFor = null; }
   library = library.filter(x => x !== e); rebuild(); showSelected(); say(`deleted ${e.title}`, 'info');
 }
@@ -439,7 +474,7 @@ async function shareTrack(e) {
 }
 function queueAudius(t, done, failed) {
   jobs.push({ title: `${t.title} — ${t.user.name}`, url: audiusURL(`https://audius.co${t.permalink}`), done, failed,
-    bytes: () => fetch(`${AUDIUS}/${encodeURIComponent(t.id)}/stream?${APP}`).then(r => r.ok ? r.arrayBuffer() : Promise.reject(new Error(`Audius stream ${r.status}`))) });
+    bytes: () => fetch(`${AUDIUS}/${encodeURIComponent(t.id)}/stream?${APP}`).then(importBytes) });
   if (!job) nextJob();
 }
 async function resolveSharedTrack(value) {
@@ -790,12 +825,12 @@ function frame() {
   if (mode === 'play') logic(t);
   const bi = idx(beats, t);
   phase = bi < 0 || bi >= beats.length - 1 ? 0 : (t - beats[bi]) / (beats[bi + 1] - beats[bi]); pulse = Math.exp(-phase * 5);
-  camTo = playing ? trackX(cur) : Math.sin(rt * .4) * 200;
-  camX += (camTo - camX) * Math.min(1, fdt * 9);
+  camTo = playing ? trackX(cur) : reducedMotion?.matches ? 0 : Math.sin(rt * .4) * 200;
+  camX = reducedMotion?.matches ? camTo : camX + (camTo - camX) * Math.min(1, fdt * 9);
   shake = Math.max(0, shake - fdt * 40);
   const energy = playing ? .3 + groove / 100 * .7 : 1;
   const warp = (.25 + pulse * .5 + (playing ? mult * .12 : 0)) * energy;
-  for (const s of stars) { if (isLiquid() && reducedMotion?.matches) break; s.z -= fdt * warp; if (s.z < .03) { s.x = Math.random() * 2 - 1; s.y = Math.random() * 2 - 1; s.z = 1; } }
+  for (const s of stars) { if (reducedMotion?.matches) break; s.z -= fdt * warp; if (s.z < .03) { s.x = Math.random() * 2 - 1; s.y = Math.random() * 2 - 1; s.z = 1; } }
   for (const p of parts) { p.x += p.vx * fdt; p.y += p.vy * fdt; p.vy += 700 * fdt; p.vx *= .98; }
   parts = parts.filter(p => rt - p.born < p.life); pops = pops.filter(p => rt - p.born < p.life); rings = rings.filter(r => rt - r.born < .7);
   shown += (score - shown) * Math.min(1, fdt * 12);
@@ -1135,8 +1170,8 @@ function draw(t, playing) {
   hue += dh * .04;
   // slow sways locked to the bar grid (one long left-right swing per 16 bars), swooping harder as the multiplier climbs
   const u = barF(t); bendAmp += ((playing ? .45 + mult * .07 : .6) - bendAmp) * .02;
-  bendX = 190 * bendAmp * Math.sin(u * Math.PI / 8) * Math.cos(u * Math.PI / 22);
-  bendY = 80 * bendAmp * Math.sin(u * Math.PI / 12 + 1);
+  bendX = (reducedMotion?.matches ? 0 : 190) * bendAmp * Math.sin(u * Math.PI / 8) * Math.cos(u * Math.PI / 22);
+  bendY = (reducedMotion?.matches ? 0 : 80) * bendAmp * Math.sin(u * Math.PI / 12 + 1);
   const vx = W / 2 + bendX, vy = HZ - bendY; // where the road vanishes
   g.setTransform(DPR, 0, 0, DPR, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
   const sky = g.createLinearGradient(0, 0, 0, H);
@@ -1144,8 +1179,9 @@ function draw(t, playing) {
   g.fillStyle = sky; g.fillRect(0, 0, W, H);
 
   // camera: shake + roll that leans into track switches
-  g.translate(W / 2 + (Math.random() - .5) * shake, H / 2 + (Math.random() - .5) * shake);
-  g.rotate((camX - camTo) * .0005 - bendX * .0003); g.translate(-W / 2, -H / 2); // bank into the curve
+  const cameraShake = reducedMotion?.matches ? 0 : shake;
+  g.translate(W / 2 + (Math.random() - .5) * cameraShake, H / 2 + (Math.random() - .5) * cameraShake);
+  g.rotate(reducedMotion?.matches ? 0 : (camX - camTo) * .0005 - bendX * .0003); g.translate(-W / 2, -H / 2); // bank into the curve
 
   g.globalCompositeOperation = 'lighter'; g.lineWidth = 1.5;
   for (let i = 0; i < (isPaper() || isCircuit() ? 0 : isLiquid() ? 45 : stars.length); i++) {

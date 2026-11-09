@@ -4,9 +4,9 @@
 usage: .venv/bin/python prep.py path/to/song.mp3 [--title "Name"] [--bpm 128] [--density 2]
 
 Writes songs/<slug>/{song.json, drums.mp3, bass.mp3, vocals.mp3, other.mp3} and updates songs/index.json.
-Separated WAVs are cached in .cache/<slug>/ so re-charting (e.g. a different --density) skips Demucs.
+Separated WAVs are cached by source hash in .cache/<sha256>/ so re-charting (e.g. a different --density) skips Demucs.
 """
-import argparse, json, re, shutil, subprocess, sys
+import argparse, hashlib, json, re, shutil, subprocess, sys
 from pathlib import Path
 import numpy as np, librosa
 
@@ -86,6 +86,20 @@ def chart(y, beats, bars, pitch, density):
     return [[round(float(t), 4), int(l)] for t, l in zip(ts, lanes)]
 
 
+def source_paths(src, title):
+    with src.open('rb') as audio:
+        digest = hashlib.file_digest(audio, 'sha256').hexdigest()
+    slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-') or 'song'
+    out = ROOT / 'songs' / slug
+    marker = out / 'source.sha256'
+    if out.exists() and any(out.iterdir()) and (not marker.exists() or marker.read_text().strip() != digest):
+        raise ValueError(f'{out} belongs to another or unknown source; choose a different --title')
+    cache = ROOT / '.cache' / digest
+    cache.mkdir(parents=True, exist_ok=True); out.mkdir(parents=True, exist_ok=True)
+    marker.write_text(digest)
+    return slug, cache, out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('src', type=Path)
@@ -94,9 +108,7 @@ def main():
     ap.add_argument('--density', type=int, default=2, choices=[1, 2, 4], help='max notes per beat per track')
     a = ap.parse_args()
     title = a.title or a.src.stem
-    slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
-    cache, out = ROOT / '.cache' / slug, ROOT / 'songs' / slug
-    cache.mkdir(parents=True, exist_ok=True); out.mkdir(parents=True, exist_ok=True)
+    slug, cache, out = source_paths(a.src, title)
 
     separate(a.src, cache)
     mix, _ = librosa.load(a.src, sr=SR)
