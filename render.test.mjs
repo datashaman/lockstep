@@ -32,7 +32,7 @@ vm.runInContext(source, context);
 vm.runInContext(`
   for (const vertical of [-81, -50, 0, 50, 81]) {
     bendY = vertical; bendX = 170; camX = 291;
-    assert.deepEqual(P(291, 0), [400, HIT_Y], 'judgement line stays fixed');
+    assert.deepEqual(Array.from(P(291, 0)), [400, HIT_Y], 'judgement line stays fixed');
     let previous = P(291, 0)[1];
     for (let d = .05; d <= LOOK; d += .05) {
       const y = P(291, d)[1]; assert.ok(y < previous, 'road must recede monotonically, never curl back'); previous = y;
