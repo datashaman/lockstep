@@ -16,12 +16,13 @@ export function createAudioHarness() {
       nodes.push(this);
       this.edges = new Set();
       this.starts = [];
+      this.offsets = [];
       this.stops = [];
       for (const name of ['gain', 'frequency', 'detune', 'Q', 'delayTime', 'threshold', 'ratio', 'playbackRate']) this[name] = parameter();
     }
     connect(target) { this.edges.add(target); return target; }
     disconnect() { this.edges.clear(); }
-    start(when) { this.starts.push(when); }
+    start(when, offset) { this.starts.push(when); this.offsets.push(offset); }
     stop(when) { this.stops.push(when); }
   }
   class AudioContext {
