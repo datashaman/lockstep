@@ -1,4 +1,5 @@
-import { createMaterialShader } from './shader-renderer.js';
+// @ts-check
+import { createMaterialShader } from "./shader-renderer.js";
 
 export const LIQUID_FRAGMENT = `
 precision mediump float;
@@ -33,4 +34,6 @@ void main() {
 }
 `;
 
-export const createLiquidShader = makeCanvas => createMaterialShader(LIQUID_FRAGMENT, makeCanvas);
+/** @param {()=>HTMLCanvasElement} [makeCanvas] */
+export const createLiquidShader = (makeCanvas) =>
+  createMaterialShader(LIQUID_FRAGMENT, makeCanvas);

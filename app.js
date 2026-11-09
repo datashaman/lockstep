@@ -1,3 +1,4 @@
+// @ts-check
 import { createSceneRenderer } from "./lib/scene-renderer.js";
 import { createSongMenu, createTrackDialog } from "./lib/song-menu.js";
 import {
@@ -126,7 +127,7 @@ const W = 800,
   LW = TW / 3;
 const SANS = "system-ui, sans-serif",
   MONO = "ui-monospace, Menlo, monospace";
-const cv = document.getElementById("c"),
+const cv = /** @type {HTMLCanvasElement} */ (document.getElementById("c")),
   g = cv.getContext("2d"),
   DPR = Math.min(2, globalThis.devicePixelRatio || 1);
 cv.width = W * DPR;
@@ -154,9 +155,11 @@ const PICK = {
   lead: (s, r) => (s % 2 === 0 && r() < 0.35 ? Math.floor(r() * 3) : -1),
 };
 // One 2-bar phrase per 8-bar section, repeated 4x, so the player can learn it.
+/** @returns {import('./lib/song').Note[]} */
 function chart(kind, seed) {
-  const r = rng(seed),
-    notes = [];
+  const r = rng(seed);
+  /** @type {import('./lib/song').Note[]} */
+  const notes = [];
   for (let sec = 0; sec < BARS / 8; sec++) {
     const phrase = [];
     for (let s = 0; s < 32; s++) {
@@ -173,6 +176,7 @@ function chart(kind, seed) {
 }
 // A song: { title, duration, beats: [s], downbeat: index of first bar's beat, tracks: [{ name, notes: [[t, lane]] }] }
 // plus either synth: true (built-in demo, notes make sounds) or buffers: [AudioBuffer per track] (real stems).
+/** @returns {import('./lib/song').PlayableSong} */
 const demoSong = () => ({
   title: "Demo (synth)",
   synth: true,
@@ -196,8 +200,9 @@ let ac,
   song = demoSong(),
   tracks,
   overAt = 0;
-let mode = "title",
-  loadErr = "";
+/** @type {import("./lib/input-actions.js").Screen} */
+let mode = "title";
+let loadErr = "";
 let level = +(globalThis.localStorage?.lockstepLevel ?? 1);
 let offset = +(globalThis.localStorage?.lockstepOffset || 0),
   offsetAt = -9; // player's audio calibration, seconds
@@ -378,6 +383,7 @@ Promise.all(
   .then(() => import("./analyze.js"))
   .then((m) => (CHART_V = m.CHART_V))
   .catch(() => {});
+/** @type {Map<string,{ok:(result:import("./lib/worker").WorkerDone)=>void,no:(error:Error)=>void,onProgress?:(event:import("./lib/worker").WorkerProgress)=>void}>} */
 const pending = new Map();
 function releaseWorker() {
   if (worker && !pending.size && !job && !jobs.length) {
@@ -385,11 +391,17 @@ function releaseWorker() {
     worker = null;
   }
 }
+/** @param {import("./lib/worker").WorkerRequest} msg @param {Transferable[]} [transfer] @param {(event:import("./lib/worker").WorkerProgress)=>void} [onProgress]
+ * @returns {Promise<import("./lib/worker").WorkerDone>} */
 function work(msg, transfer = [], onProgress) {
   // run a job on the separator worker; replies are routed by id
   if (!worker) {
     worker = new Worker("separator.js", { type: "module" });
-    worker.onmessage = ({ data: d }) => {
+    worker.onmessage = (
+      /** @type {MessageEvent<import("./lib/worker").WorkerResponse>} */ {
+        data: d,
+      },
+    ) => {
       const p = pending.get(d.id);
       if (!p) return;
       if (d.type === "progress") return p.onProgress?.(d);
@@ -404,10 +416,15 @@ function work(msg, transfer = [], onProgress) {
       worker = null;
     };
   }
-  return new Promise((ok, no) => {
-    pending.set(msg.id, { ok, no, onProgress });
-    worker.postMessage(msg, transfer);
-  }).finally(releaseWorker);
+  return new Promise(
+    /** @param {(result:import("./lib/worker").WorkerDone)=>void} ok */ (
+      ok,
+      no,
+    ) => {
+      pending.set(msg.id, { ok, no, onProgress });
+      worker.postMessage(msg, transfer);
+    },
+  ).finally(releaseWorker);
 }
 let toast = { s: "", kind: "ok", at: -9 };
 const say = (s, kind = "ok") => (toast = { s, kind, at: rt }); // kind: ok | info | err
@@ -505,7 +522,7 @@ async function start() {
     song = await loadSong(e);
     reset(menuImage);
   } catch (err) {
-    loadErr = `could not load: ${err.message || err}`;
+    loadErr = `could not load: ${err instanceof Error ? err.message : String(err)}`;
     say(loadErr, "err");
     mode = "title";
     showSelected();
@@ -551,7 +568,10 @@ function showSelected() {
       });
     } catch (err) {
       if (n === pvN)
-        say(`could not load ${e.title}: ${err.message || err}`, "err");
+        say(
+          `could not load ${e.title}: ${err instanceof Error ? err.message : String(err)}`,
+          "err",
+        );
     }
   }, 250);
 }
@@ -634,7 +654,10 @@ async function nextJob() {
     say(`added ${job.title} · ${meta.bpm} BPM`);
     j.done?.(entry);
   } catch (err) {
-    say(`${job.title}: ${err.message || err}`, "err");
+    say(
+      `${job.title}: ${err instanceof Error ? err.message : String(err)}`,
+      "err",
+    );
     j.failed?.(err);
   }
   nextJob();
@@ -643,7 +666,10 @@ async function removeSong(e) {
   try {
     await songLibrary.remove(e.lib);
   } catch (err) {
-    say(`could not delete: ${err.message || err}`, "err");
+    say(
+      `could not delete: ${err instanceof Error ? err.message : String(err)}`,
+      "err",
+    );
     return;
   }
   if (pvFor === e) {
@@ -661,7 +687,7 @@ const picker = globalThis.document?.createElement
       accept: "audio/*",
       multiple: true,
     })
-  : { click() {} };
+  : { click() {}, onchange: null, files: null, value: "" };
 picker.onchange = () => {
   addFiles(picker.files);
   picker.value = "";
@@ -833,7 +859,7 @@ async function openSharedTrack(value) {
           say("Shared track is ready — press Enter to play", "info");
         }
       } catch (err) {
-        status.textContent = err.message || String(err);
+        status.textContent = err instanceof Error ? err.message : String(err);
         play.disabled = false;
         play.textContent = "Try again";
       } finally {
@@ -841,7 +867,8 @@ async function openSharedTrack(value) {
       }
     };
   } catch (err) {
-    if (d.open) status.textContent = err.message || String(err);
+    if (d.open)
+      status.textContent = err instanceof Error ? err.message : String(err);
   }
 }
 if (globalThis.location) {
@@ -1063,13 +1090,15 @@ function bindTouchPad(button) {
 }
 function updateTouchControls() {
   if (!touchEnabled) return;
-  const songSelect = document.getElementById("touch-song");
+  const songSelect = /** @type {HTMLSelectElement} */ (
+    document.getElementById("touch-song")
+  );
   if (touchCatalog !== menu.entries) {
     touchCatalog = menu.entries;
     songSelect.replaceChildren(
       ...menu.entries.map((e, i) => {
         const option = document.createElement("option");
-        option.value = i;
+        option.value = String(i);
         option.textContent = e.title;
         return option;
       }),
@@ -1093,23 +1122,32 @@ function updateTouchControls() {
     clearTouchPointers();
     document.getElementById("touch-settings").hidden = true;
   }
-  for (const group of touchDock.querySelectorAll("[data-screen]"))
+  for (const group of /** @type {NodeListOf<HTMLElement>} */ (
+    touchDock.querySelectorAll("[data-screen]")
+  ))
     group.hidden = !group.dataset.screen.split(" ").includes(mode);
   songSelect.value = String(menu.selected);
-  document.getElementById("touch-level").value = String(level);
+  /** @type {HTMLSelectElement} */ (
+    document.getElementById("touch-level")
+  ).value = String(level);
   document.getElementById("touch-theme").textContent = `Theme: ${theme.name}`;
-  document.getElementById("touch-share").disabled = !audiusURL(
-    menu.entries[menu.selected]?.url,
-  );
-  document.getElementById("touch-delete").disabled =
-    mode !== "title" || !menu.entries[menu.selected]?.lib;
-  document.getElementById("touch-default").disabled = mode !== "title";
+  /** @type {HTMLButtonElement} */ (
+    document.getElementById("touch-share")
+  ).disabled = !audiusURL(menu.entries[menu.selected]?.url);
+  /** @type {HTMLButtonElement} */ (
+    document.getElementById("touch-delete")
+  ).disabled = mode !== "title" || !menu.entries[menu.selected]?.lib;
+  /** @type {HTMLButtonElement} */ (
+    document.getElementById("touch-default")
+  ).disabled = mode !== "title";
   document.getElementById("touch-offset").textContent =
     `Audio offset: ${Math.round(offset * 1000)} ms`;
-  document.getElementById("touch-resume").textContent = pauseState?.deadline
-    ? "Cancel countdown"
-    : "Resume";
-  document.getElementById("touch-resume").disabled = !!pauseState?.busy;
+  /** @type {HTMLButtonElement} */ (
+    document.getElementById("touch-resume")
+  ).textContent = pauseState?.deadline ? "Cancel countdown" : "Resume";
+  /** @type {HTMLButtonElement} */ (
+    document.getElementById("touch-resume")
+  ).disabled = !!pauseState?.busy;
   touchDock.style.setProperty(
     "--track-color",
     tracks[run.currentTrack]?.color || "#4cc9f0",
@@ -1125,33 +1163,57 @@ if (touchDock?.querySelectorAll) {
   };
   coarse.addEventListener?.("change", enable);
   Promise.resolve().then(enable);
-  for (const button of touchDock.querySelectorAll("[data-pad]"))
+  for (const button of /** @type {NodeListOf<HTMLElement>} */ (
+    touchDock.querySelectorAll("[data-pad]")
+  ))
     bindTouchPad(button);
-  for (const button of touchDock.querySelectorAll("[data-key]"))
+  for (const button of /** @type {NodeListOf<HTMLElement>} */ (
+    touchDock.querySelectorAll("[data-key]")
+  ))
     button.addEventListener("click", () => {
       handleKey({ key: button.dataset.key });
       updateTouchControls();
     });
-  for (const button of touchDock.querySelectorAll("[data-settings]"))
+  for (const button of /** @type {NodeListOf<HTMLElement>} */ (
+    touchDock.querySelectorAll("[data-settings]")
+  ))
     button.addEventListener("click", () => {
       const panel = document.getElementById("touch-settings");
       panel.hidden = !panel.hidden;
     });
-  document.getElementById("touch-default").addEventListener("click", () => {
+  /** @type {HTMLButtonElement} */ (
+    document.getElementById("touch-default")
+  ).addEventListener("click", () => {
     if (mode === "title") {
       chooseTheme(true);
       updateTouchControls();
     }
   });
-  document.getElementById("touch-song").addEventListener("change", (e) => {
+  /** @type {HTMLSelectElement} */ (
+    document.getElementById("touch-song")
+  ).addEventListener("change", (e) => {
     if (!ac) initAudio();
-    pick(Number(e.target.value));
+    pick(
+      Number(
+        /** @type {HTMLInputElement | HTMLSelectElement} */ (e.target).value,
+      ),
+    );
   });
   document
     .getElementById("touch-level")
-    .addEventListener("change", (e) => setLevel(Number(e.target.value)));
-  document.getElementById("touch-search").addEventListener("input", (e) => {
-    au.q = e.target.value.slice(0, 40);
+    .addEventListener("change", (e) =>
+      setLevel(
+        Number(
+          /** @type {HTMLInputElement | HTMLSelectElement} */ (e.target).value,
+        ),
+      ),
+    );
+  /** @type {HTMLInputElement} */ (
+    document.getElementById("touch-search")
+  ).addEventListener("input", (e) => {
+    au.q = /** @type {HTMLInputElement | HTMLSelectElement} */ (
+      e.target
+    ).value.slice(0, 40);
     clearTimeout(auTimer);
     clearTimeout(peekTimer);
     peek?.pause();
@@ -1159,7 +1221,9 @@ if (touchDock?.querySelectorAll) {
   });
   document.getElementById("touch-find").addEventListener("submit", (e) => {
     e.preventDefault();
-    document.getElementById("touch-search").blur();
+    /** @type {HTMLInputElement} */ (
+      document.getElementById("touch-search")
+    ).blur();
     handleKey({ key: "Enter" });
   });
   addEventListener("blur", clearTouchPointers);
@@ -1195,7 +1259,10 @@ function pauseGame() {
     if (pauseState === state) {
       mode = "play";
       pauseState = null;
-      say(`could not pause: ${err.message || err}`, "err");
+      say(
+        `could not pause: ${err instanceof Error ? err.message : String(err)}`,
+        "err",
+      );
     }
   });
 }
@@ -1221,7 +1288,10 @@ async function resumeGame(action = null) {
   } catch (err) {
     state.busy = false;
     state.deadline = 0;
-    say(`could not resume: ${err.message || err}`, "err");
+    say(
+      `could not resume: ${err instanceof Error ? err.message : String(err)}`,
+      "err",
+    );
   }
 }
 function resumeCountdown() {
@@ -1598,6 +1668,7 @@ function drawTitle() {
 }
 const LIST = { x: 32, y: 128, w: 372, h: 350 };
 function drawList() {
+  /** @type {{hdr?:string,e?:import("./lib/song").SongEntry,j?:{title:string,phase:string,progress?:number},note?:string,y?:number,h?:number}[]} */
   const rows = [
     { hdr: "YOUR LIBRARY" },
     ...menu.library.map((e) => ({ e })),
@@ -1714,10 +1785,10 @@ function drawList() {
     }
   }
   g.restore();
-  [
+  /** @type {[import("./lib/song").SongEntry,string,string][]} */ ([
     [ADD, "O", "Add a file"],
     [FIND, "F", "Find on Audius"],
-  ].forEach(([e, k, s], n) => {
+  ]).forEach(([e, k, s], n) => {
     const w = (LIST.w - 10) / 2,
       x = LIST.x + n * (w + 10),
       y = LIST.y + LIST.h + 14,
@@ -2200,10 +2271,10 @@ function drawFailure() {
     "#a6b6c8",
   );
   zones = [];
-  [
+  /** @type {[string,string,()=>void][]} */ ([
     ["SPACE / ENTER", "Retry", reset],
     ["ESC", "Song selection", toTitle],
-  ].forEach(([key, label, action], i) => {
+  ]).forEach(([key, label, action], i) => {
     const y = 395 + i * 54;
     box(220, y, 360, 44, 8, "rgba(255,255,255,.08)", "rgba(255,255,255,.2)");
     shortcut(key, label, W / 2, y + 28);

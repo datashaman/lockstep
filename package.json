@@ -4,9 +4,9 @@
   "type": "module",
   "scripts": {
     "test": "node --test *.test.mjs",
-    "typecheck": "tsc --noEmit",
-    "format": "prettier --write app.js index.html styles.css lib/*.js lib/*.ts",
-    "format:check": "prettier --check app.js index.html styles.css lib/*.js lib/*.ts"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.browser.json",
+    "format": "prettier --write *.js index.html styles.css lib/*.js lib/*.ts",
+    "format:check": "prettier --check *.js index.html styles.css lib/*.js lib/*.ts"
   },
   "devDependencies": {
     "prettier": "3.6.2",

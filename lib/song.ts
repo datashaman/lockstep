@@ -29,6 +29,7 @@ export interface TempoSegment {
 }
 
 export interface PlayableSong {
+  bpm?: number;
   title: string;
   duration: number;
   beats: number[];

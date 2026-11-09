@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "checkJs": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ]
+  },
+  "include": [
+    "*.js",
+    "lib/**/*"
+  ],
+  "exclude": [
+    "*.test.mjs"
+  ]
+}

@@ -48,7 +48,7 @@ python3 prep_test.py
 
 GitHub Actions runs these checks on pull requests and pushes to `main`, using Node 24 and Python 3.13. The workflow uses commit-pinned official actions and a read-only repository token.
 
-`lib/song.ts` defines shared data shapes. The modules in `lib/` use JSDoc references to those types and are checked with strict TypeScript. JavaScript remains the browser's source, so there is no generated directory to keep synchronized. `app.js` and the older renderer/worker files are not yet fully type-checked.
+`lib/song.ts` defines shared data shapes. The modules in `lib/`, including the scene renderer and its shader dependencies, use JSDoc references and strict TypeScript. `tsconfig.browser.json` additionally checks every first-party browser/worker entry point. It temporarily permits inferred parameter types and nullable legacy state; this is checked JavaScript coverage, not a claim that the entry point is fully strict. Vendor implementation code is excluded from checking. `lib/worker.ts` defines the request/reply protocol on both sides, and `lib/scene.ts` defines the renderer frame. JavaScript remains the browser source, with no generated files.
 
 Run `npm run format` after changing the entry point, page, styles or library modules. Readability is intentional: expand state transitions into steps and prefer descriptive names over reducing line count.
 
@@ -56,6 +56,6 @@ New module tests should import the real module and exercise its public interface
 
 ## Remaining migration
 
-This first extraction removes storage, import validation, timing calculations, synthesized audio and recorded-stem playback from the application. The Canvas renderer, menu flow and input routing still share application state. Move those one at a time with their existing regression checks; do not split them into files that silently share globals.
+This first extraction removes storage, import validation, timing calculations, synthesized audio and recorded-stem playback from the application. Input routing, gameplay rules, catalog/search state and scene rendering now have explicit interfaces. The app still coordinates playback, import jobs, animation and screen composition. The remaining type work is to tighten the entry point’s nullable lifecycle state and inferred parameters; the existing strict library check must stay enabled.
 
 A UI framework can be evaluated when the library/search/settings screens have an independent state model. It is not needed for the Canvas or audio engines, and no framework migration is part of this change.

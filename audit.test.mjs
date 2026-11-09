@@ -61,7 +61,7 @@ class Processor {
 const worker = vm.createContext({ DemucsProcessor:Processor, CONSTANTS:{ DEFAULT_MODEL_URL:'model' }, self:{}, navigator:{},
   loadRuntime:async()=>{ runtimeLoads++; return { env:{ wasm:{} } }; }, analyze:()=>({tracks:[{stem:'drums'}]}), postMessage:m=>messages.push(m),
   caches:{ open:async()=>({match:async()=>({arrayBuffer:async()=>new ArrayBuffer(0)})}) } });
-const source = readFileSync('separator.js','utf8').replace(/^import .*;$/gm,'').replace(/import\('https:[^']+'\)/, 'loadRuntime()');
+const source = readFileSync('separator.js','utf8').replace(/^import .*;$/gm,'').replace(/import\(\s*['"]https:[^'"]+['"]\s*\)/, 'loadRuntime()');
 vm.runInContext(source, worker);
 await vm.runInContext("onmessage({data:{id:'chart',stems:{}}})", worker);
 assert.equal(runtimeLoads, 0, 'rechart works without loading remote runtime');
