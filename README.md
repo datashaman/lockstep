@@ -63,6 +63,10 @@ Your best grade and score for each song and difficulty are kept in this browser.
 with the game. Stem caches are keyed by the source audio hash. Reusing a title with different audio is rejected; choose a different `--title`. Existing output directories without a source hash are also protected from overwriting. Setup: `uv venv && uv pip install demucs librosa soundfile`, plus `ffmpeg` on PATH; run with `.venv/bin/python prep.py song.mp3`.
 Do not commit songs you don't own the rights to; `.gitignore` keeps everything but the generated test song out.
 
+## Development
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for module responsibilities and the migration plan. Run `npm ci` once, then `npm run typecheck`, `npm test`, and `npm run format:check`. The game still runs with the static Python server; no build step is required.
+
 ## Test
 
 ```sh

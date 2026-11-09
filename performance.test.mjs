@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { appSource, appImports } from './test/app-harness.mjs';
 import vm from 'node:vm';
-const source = readFileSync(new URL('./index.html', import.meta.url), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const source = appSource;
 const nodes = [];
 const param = () => ({ value: 0, setValueAtTime() {}, setTargetAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {} });
 class Node {
@@ -21,7 +21,7 @@ class AudioContext {
 const gradient = { addColorStop() {} };
 const g = new Proxy({}, { get: (o, k) => o[k] ?? (k === 'measureText' ? s => ({ width: s.length * 7 }) : k.startsWith('create') ? () => gradient : () => {}), set: (o, k, v) => (o[k] = v, true) });
 const timers = new Map(); let timerId = 0;
-const context = vm.createContext({ assert, AudioContext, console, performance, Float32Array,
+const context = vm.createContext({ ...appImports, assert, AudioContext, console, performance, Float32Array,
   document: { getElementById: () => ({ getContext: () => g, addEventListener() {} }) },
   addEventListener() {}, requestAnimationFrame() {}, fetch: () => Promise.reject(new Error('offline')),
   setTimeout: fn => { timers.set(++timerId, fn); return timerId; }, clearTimeout: id => timers.delete(id),

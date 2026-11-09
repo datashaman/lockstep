@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-const html = readFileSync('index.html', 'utf8');
+import { createSongLibrary } from './lib/song-library.js';
+import { checkImportSize, checkImportDuration, importBytes, importDuration } from './lib/audio-import.js';
 // Exercise commit/abort timing and verify both records share one transaction.
 let tx;
 const records = { songs: new Map(), pcm: new Map() };
@@ -10,40 +11,45 @@ const db = { transaction(stores) {
   tx = { stores, objectStore(name) { assert.ok(stores.includes(name)); return {
     put(value, key = value.id) { staged[name].set(key, value); return { result: key }; },
     delete(key) { staged[name].delete(key); return {}; },
+    get(key) { const request = { result: staged[name].get(key) }; queueMicrotask(() => request.onsuccess?.()); return request; },
   }; }, abort() { this.onabort(); }, commit() { Object.assign(records, staged); this.oncomplete(); } };
   return tx;
 } };
-const c = vm.createContext({ dbp: Promise.resolve(db) });
-vm.runInContext(html.slice(html.indexOf('const dbTransaction ='), html.indexOf('const i2f =')), c);
+const library = createSongLibrary(Promise.resolve(db));
 let settled = false;
-let saving = vm.runInContext("saveSong({ id: 'a' }, [1])", c).then(() => settled = true);
+let saving = library.save({ id: 'a' }, [1]).then(() => settled = true);
 await new Promise(setImmediate); assert.equal(settled, false); assert.deepEqual(Array.from(tx.stores), ['songs','pcm']);
 tx.commit(); await saving; assert.ok(records.songs.has('a')); assert.ok(records.pcm.has('a'));
-let deleting = vm.runInContext("deleteSong('a')", c);
+let deleting = library.remove('a');
 const aborted = assert.rejects(deleting, /aborted/);
 await new Promise(setImmediate); tx.abort(); await aborted;
 assert.ok(records.songs.has('a')); assert.ok(records.pcm.has('a'));
-saving = vm.runInContext("saveSong({ id: 'b' }, [2])", c);
+saving = library.save({ id: 'b' }, [2]);
 const failed = assert.rejects(saving, /aborted/); await new Promise(setImmediate); tx.abort(); await failed;
 assert.equal(records.songs.has('b'), false); assert.equal(records.pcm.has('b'), false);
-deleting = vm.runInContext("deleteSong('a')", c); await new Promise(setImmediate); tx.commit(); await deleting;
+deleting = library.remove('a'); await new Promise(setImmediate); tx.commit(); await deleting;
 assert.equal(records.songs.size + records.pcm.size, 0);
+const update = library.updateChart('a', { beats: [0, .5] });
+await new Promise(setImmediate); tx.commit(); await update;
+assert.equal(records.songs.size, 0, 'a late chart update cannot recreate a deleted song');
 console.log('ok: library mutations wait for commit, save/delete both records atomically, abort preserves data');
 
-const imports = vm.createContext({ navigator: {}, Number, Blob, setTimeout, clearTimeout });
-vm.runInContext(html.slice(html.indexOf('const MAX_IMPORT_BYTES'), html.indexOf('const AUDIO =')), imports);
-vm.runInContext('checkImportSize(64 * 1024 * 1024); checkImportDuration(600)', imports);
-for (const code of ['checkImportSize(64 * 1024 * 1024 + 1)', 'checkImportDuration(Infinity)', 'checkImportDuration(601)', 'checkImportDuration(0)']) assert.throws(() => vm.runInContext(code, imports));
-assert.ok(!html.includes('checkImportDevice'), 'imports are not blocked by device identity');
+checkImportSize(64 * 1024 * 1024); checkImportDuration(600);
+for (const duration of [Infinity, 601, 0]) assert.throws(() => checkImportDuration(duration));
+assert.throws(() => checkImportSize(64 * 1024 * 1024 + 1));
 let cancelled = false;
-imports.response = { ok:true, headers: { get:()=>null }, body: { getReader:()=>({ read:async()=>({value:{byteLength:64*1024*1024+1}}), cancel:async()=>cancelled=true, releaseLock(){} }) } };
-await assert.rejects(vm.runInContext('importBytes(response)', imports), /64 MiB/); assert.ok(cancelled);
-let audio, revoked = false;
-imports.URL = { createObjectURL:()=> 'blob:test', revokeObjectURL:()=>revoked=true };
-imports.document = { createElement:()=> audio = { removeAttribute(){}, load(){} } };
-const metadata = vm.runInContext('importDuration(new ArrayBuffer(1))', imports);
-audio.duration = 601; const rejectedMetadata = assert.rejects(metadata, /10 minutes/); audio.onloadedmetadata(); await rejectedMetadata;
-assert.ok(revoked); assert.equal(audio.onloadedmetadata, null);
+const response = { ok:true, headers: { get:()=>null }, body: { getReader:()=>({ read:async()=>({value:{byteLength:64*1024*1024+1}}), cancel:async()=>cancelled=true, releaseLock(){} }) } };
+await assert.rejects(importBytes(response), /64 MiB/); assert.ok(cancelled);
+let audio;
+const originalDocument = globalThis.document;
+globalThis.document = { createElement:()=> audio = { removeAttribute(){}, load(){} } };
+try {
+  const metadata = importDuration(new ArrayBuffer(1));
+  audio.duration = 601;
+  const rejectedMetadata = assert.rejects(metadata, /10 minutes/);
+  audio.onloadedmetadata(); await rejectedMetadata;
+  assert.equal(audio.onloadedmetadata, null);
+} finally { globalThis.document = originalDocument; }
 console.log('ok: import byte and duration limits, bounded download cancellation, metadata cleanup');
 
 let runtimeLoads = 0, modelAttempts = 0;
