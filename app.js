@@ -1,3 +1,16 @@
+import {
+  createRunState,
+  applyGroove,
+  isAutomatic,
+  noteIndex,
+  findHittableNote,
+  recordHit,
+  recordCapture,
+  recordMiss,
+  nextTrack,
+  createTracks,
+} from "./lib/gameplay.js";
+const run = createRunState();
 import { actionForKey } from "./lib/input-actions.js";
 import { createStemPlayer } from "./lib/stem-player.js";
 import { createAudioEngine } from "./lib/audio-engine.js";
@@ -16,7 +29,6 @@ import {
   importBytes,
   importDuration,
 } from "./lib/audio-import.js";
-
 // Lockstep: original phrase-capture rhythm game. J K L = lanes, A / D = switch track.
 const BPM = 120,
   STEP = 60 / BPM / 4,
@@ -96,7 +108,6 @@ function chooseTheme(useAsDefault = false) {
     localStorage.lockstepThemes = JSON.stringify(themeSettings);
   } catch {}
 }
-
 const W = 800,
   H = 600,
   HZ = 190,
@@ -116,7 +127,6 @@ cv.height = H * DPR;
 const reducedMotion = globalThis.matchMedia?.(
   "(prefers-reduced-motion: reduce)",
 );
-
 function rng(seed) {
   return () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
 }
@@ -169,7 +179,6 @@ const demoSong = () => ({
     ["LEAD", "lead"],
   ].map(([name, kind], i) => ({ name, kind, notes: chart(kind, 7 + i * 101) })),
 });
-
 // ---------- state ----------
 let ac,
   audio,
@@ -179,9 +188,6 @@ let ac,
   sched,
   song = demoSong(),
   tracks,
-  cur = 0,
-  score = 0,
-  mult = 1,
   overAt = 0;
 let mode = "title",
   catalog = [],
@@ -191,10 +197,7 @@ let level = +(globalThis.localStorage?.lockstepLevel ?? 1);
 let offset = +(globalThis.localStorage?.lockstepOffset || 0),
   offsetAt = -9; // player's audio calibration, seconds
 let beats, bars, gridDown;
-let hits = 0,
-  misses = 0,
-  caps = 0,
-  shown = 0,
+let shown = 0,
   rt = 0,
   last = performance.now() / 1000,
   phase = 0,
@@ -214,9 +217,7 @@ let dash = null,
   syncAt = -9;
 let pauseState = null,
   visualOffset = 0;
-let groove = 100,
-  missStreak = 0,
-  failedAt = 0;
+let failedAt = 0;
 let tempo = [{ at: 0, pos: 0, rate: 1 }];
 let parts = [],
   pops = [],
@@ -252,8 +253,8 @@ function setTempo(rate) {
   stemPlayer?.setRate(rate, t0 + at);
 }
 function changeGroove(amount) {
-  groove = Math.max(0, Math.min(100, groove + amount));
-  if (!groove) {
+  const rate = applyGroove(run, amount);
+  if (!run.groove) {
     failedAt = now();
     mode = "failed";
     inSync = false;
@@ -263,14 +264,13 @@ function changeGroove(amount) {
     audio?.mute();
     return;
   }
-  setTempo(groove >= 40 ? 1 : 0.55 + (0.45 * groove) / 40);
+  setTempo(rate);
 }
-const auto = (tr, n) => n.bar >= tr.capFrom && n.bar < tr.capTo;
+const auto = isAutomatic;
 const locked = (tr, t) => bar(t) < tr.capTo;
 const captureRemaining = (tr, t) =>
   Math.max(0, Math.min(1, (tr.capTo - barF(t)) / CAPTURE_BARS));
 const trackX = (i) => (i - 1.5) * (TW + GAP);
-
 // Beat grid: the song's beats, extended back through the count-in and forward past the end.
 function setGrid(song) {
   ({ beats, bars, downbeat: gridDown } = extendBeatGrid(song, LEAD_IN, LOOK));
@@ -281,58 +281,23 @@ const bar = (time) => Math.floor(barF(time));
 const slot = (time) => beatSlot(beats, time);
 const thin = (notes, level) => thinChart(notes, level, beats);
 const buildTracks = () =>
-  song.tracks.map((tr, i) => ({
-    name: tr.name,
-    kind: tr.kind,
-    color: theme.colors[i],
-    capFrom: -1,
-    capTo: -1,
-    capAt: -9,
-    live: false,
-    hits: 0,
-    misses: 0,
-    caps: 0,
-    timing: 0,
-    judged: 0,
-    notes: thin(tr.notes, level).map(([t, lane]) => ({
-      t,
-      lane,
-      bar: bar(t),
-      hit: false,
-      missed: false,
-    })),
-  }));
-
-// Stored charts are time-sorted; bound hot loops to the interval they actually use.
-function noteIndex(notes, t) {
-  let lo = 0,
-    hi = notes.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (notes[mid].t < t) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo;
-}
+  createTracks(song.tracks, theme.colors, level, beats, bars);
 function phraseNotes(tr, phrase) {
   return tr.notes.slice(
     noteIndex(tr.notes, phrase ? bars[phrase * 2] : -Infinity),
     noteIndex(tr.notes, bars[phrase * 2 + 2] ?? Infinity),
   );
 }
-
 const stopStems = () => stemPlayer?.stop();
 function reset(menuImage = null) {
+  Object.assign(run, createRunState());
   setGrid(song);
   tracks = buildTracks();
-  cur = Math.max(
+  run.currentTrack = Math.max(
     0,
     tracks.findIndex((tr) => tr.notes.length),
   );
-  score = 0;
-  mult = 1;
   mode = "play";
-  hits = misses = caps = 0;
   shown = 0;
   parts = [];
   pops = [];
@@ -343,9 +308,8 @@ function reset(menuImage = null) {
   inSync = false;
   syncAt = -9;
   entrance = menuImage ? { image: menuImage, at: rt } : null;
-  if (menuImage && reducedMotion?.matches) camX = camTo = trackX(cur);
-  groove = 100;
-  missStreak = 0;
+  if (menuImage && reducedMotion?.matches)
+    camX = camTo = trackX(run.currentTrack);
   tempo = [{ at: 0, pos: 0, rate: 1 }];
   audio?.stopSounds();
   audio?.restoreVolume();
@@ -386,9 +350,12 @@ const grade = (acc) =>
 function saveBest() {
   const k = `${playKey}:${level}`,
     b = best[k];
-  newBest = !b || score > b.score;
+  newBest = !b || run.score > b.score;
   if (newBest) {
-    best[k] = { score, grade: grade(hits / Math.max(1, hits + misses)) };
+    best[k] = {
+      score: run.score,
+      grade: grade(run.hits / Math.max(1, run.hits + run.misses)),
+    };
     try {
       localStorage.lockstepBest = JSON.stringify(best);
     } catch {}
@@ -451,7 +418,6 @@ const i2f = (a, o = new Float32Array(a.length)) => {
 };
 const hex = (b) =>
   [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
-
 const songLoads = new WeakMap();
 function loadSong(e) {
   if (e.song) return Promise.resolve(e.song);
@@ -552,7 +518,6 @@ function toTitle() {
   mode = "title";
   showSelected();
 }
-
 // The title screen's backdrop is the selected song: its chart scrolls behind the menu and its stems play quietly, looping from ~30 s in.
 let pvT0 = 0,
   pvFrom = 0,
@@ -610,7 +575,6 @@ function setLevel(lv) {
   setGrid(song);
   tracks = buildTracks();
 }
-
 // Add songs: decode -> separate + chart in a worker (separator.js) -> store stems as 16-bit PCM in IndexedDB.
 const AUDIO = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|aiff?|webm)$/i;
 function addFiles(files) {
@@ -706,7 +670,6 @@ addEventListener("drop", (e) => {
   e.preventDefault();
   addFiles(e.dataTransfer.files);
 });
-
 const libraryReady = songLibrary.available
   ? songLibrary
       .list()
@@ -732,7 +695,6 @@ fetch("songs/index.json")
     rebuild();
   })
   .catch(() => {}); // no songs/ yet, or file:// — fine
-
 // Audius: search or browse trending, then queue a track like a dropped file. Tracks are used under the Audius
 // Open Music License (OML), which licenses apps that play Audius audio; we credit the artist and link the track anyway.
 const AUDIUS = "https://api.audius.co/v1/tracks",
@@ -814,7 +776,6 @@ function findKey(e) {
   e.preventDefault?.();
   preview();
 }
-
 // Share only Audius provenance; no audio or local filenames leave this device.
 function audiusURL(value) {
   try {
@@ -973,7 +934,6 @@ if (globalThis.location) {
   const shared = new URL(location.href).searchParams.get("audius");
   if (shared) Promise.resolve().then(() => openSharedTrack(shared));
 }
-
 // The audio clock stays in the app; synthesis and graph ownership stay in the engine.
 function initAudio() {
   ac = new AudioContext();
@@ -985,7 +945,6 @@ function initAudio() {
   stemPlayer = createStemPlayer(ac, audio.output);
   previewPlayer = createStemPlayer(ac, audio.output);
 }
-
 // ---------- fx (x is in hit-plane world space: screen x = W/2 + x - camX) ----------
 function burst(x, y, color, n, power, spread = 0) {
   for (let k = 0; k < n; k++) {
@@ -1006,59 +965,36 @@ function burst(x, y, color, n, power, spread = 0) {
 }
 const popup = (text, x, y, color, size, life = 0.7) =>
   pops.push({ text, x, y, color, size, life, born: rt });
-
 // ---------- gameplay ----------
 // Switching is always the player's call: A/D goes to the nearest non-silent track that way, including auto tracks (no wrap-around), or nowhere.
 const playable = (tr, t) => tr.notes.length && !locked(tr, t);
-function next(dir) {
-  for (let j = cur + dir; j >= 0 && j < tracks.length; j += dir)
-    if (tracks[j].notes.length) return j;
-  return -1;
-}
+const next = (dir) => nextTrack(tracks, run.currentTrack, dir);
 function move(dir) {
   const j = next(dir);
   if (j < 0) return;
   dash = { from: craftX(), to: trackX(j), at: rt };
   audio.playSwitch(ac.currentTime);
-  tracks[cur].live = false;
-  cur = j;
+  tracks[run.currentTrack].live = false;
+  run.currentTrack = j;
 }
-
 const timingLabel = (delta) =>
   Math.abs(delta) < 0.0005
     ? "ON TIME"
     : `${Math.round(Math.abs(delta) * 1000)} ms ${delta < 0 ? "EARLY" : "LATE"}`;
-
 function tryHit(lane) {
   press[lane] = rt;
-  const tr = tracks[cur],
+  const tr = tracks[run.currentTrack],
     t = now();
   const window = LEVELS[level].win;
-  const n = tr.notes
-    .slice(noteIndex(tr.notes, t - window), noteIndex(tr.notes, t + window))
-    .find(
-      (n) =>
-        n.lane === lane &&
-        !n.hit &&
-        !n.missed &&
-        !auto(tr, n) &&
-        Math.abs(audioTime(t) - audioTime(n.t)) < window,
-    );
+  const n = findHittableNote(tr, lane, t, window, audioTime);
   if (!n) return; // shortcut: no penalty for stray presses
-  const delta = audioTime(t) - audioTime(n.t),
-    perfect = Math.abs(delta) < PERFECT,
-    x = trackX(cur) + (lane - 1) * LW;
-  n.hit = true;
-  hits++;
-  tr.hits++;
-  tr.timing += delta;
-  score += (perfect ? 15 : 10) * mult;
-  tr.live = true;
-  missStreak = 0;
-  changeGroove(perfect ? 3 : 2);
+  const delta = audioTime(t) - audioTime(n.t);
+  const { perfect, grooveGain } = recordHit(run, tr, n, delta, PERFECT);
+  const x = trackX(run.currentTrack) + (lane - 1) * LW;
+  changeGroove(grooveGain);
   if (song.synth) audio.playNote(tr.kind, lane, n.bar, ac.currentTime);
   burst(x, HIT_Y, tr.color, perfect ? 18 : 9, 1);
-  laneHit[cur * 3 + lane] = rt;
+  laneHit[run.currentTrack * 3 + lane] = rt;
   popup(
     perfect ? "PERFECT" : timingLabel(delta),
     x,
@@ -1069,17 +1005,11 @@ function tryHit(lane) {
   );
   const p = Math.floor(n.bar / 2);
   if (phraseNotes(tr, p).every((m) => m.hit)) {
-    const cx = trackX(cur);
-    tr.capFrom = (p + 1) * 2;
-    tr.capTo = tr.capFrom + CAPTURE_BARS;
-    tr.capAt = rt;
-    caps++;
-    tr.caps++;
+    const cx = trackX(run.currentTrack);
+    const bonus = recordCapture(run, tr, p, rt, CAPTURE_BARS);
     changeGroove(15);
     popup("CAPTURED", cx, HIT_Y - 130, tr.color, 38, 1.1);
-    popup(`+${100 * mult}`, cx, HIT_Y - 90, "#fff", 20, 1.1);
-    score += 100 * mult;
-    mult = Math.min(8, mult + 1);
+    popup(`+${bonus}`, cx, HIT_Y - 90, "#fff", 20, 1.1);
     burst(cx, HIT_Y, tr.color, 70, 1.8, TW);
     rings.push({ x: cx, born: rt, color: tr.color });
     shake = 12;
@@ -1087,7 +1017,6 @@ function tryHit(lane) {
     audio.playCapture(n.bar); // stay put: the arrows show where you can go next
   }
 }
-
 /** @param {import('./lib/input-actions').InputAction} action */
 function dispatchAction(action) {
   switch (action.type) {
@@ -1158,7 +1087,6 @@ function dispatchAction(action) {
       break;
   }
 }
-
 function handleKey(e) {
   if (e.target?.closest?.("input, select, textarea")) return;
   if ((e.key === " " || e.key === "Enter") && e.target?.closest?.("button"))
@@ -1183,7 +1111,6 @@ function handleKey(e) {
   if (action) dispatchAction(action);
 }
 addEventListener("keydown", handleKey);
-
 // Native controls stay outside the canvas, so fingers never cover the timing line.
 const touchDock = document.getElementById("touch-controls");
 const touchPointers = new Map();
@@ -1237,7 +1164,7 @@ function updateTouchControls() {
     level,
     theme.name,
     offset,
-    cur,
+    run.currentTrack,
     pauseState?.deadline,
     pauseState?.busy,
     help,
@@ -1266,7 +1193,10 @@ function updateTouchControls() {
     ? "Cancel countdown"
     : "Resume";
   document.getElementById("touch-resume").disabled = !!pauseState?.busy;
-  touchDock.style.setProperty("--track-color", tracks[cur]?.color || "#4cc9f0");
+  touchDock.style.setProperty(
+    "--track-color",
+    tracks[run.currentTrack]?.color || "#4cc9f0",
+  );
 }
 if (touchDock?.querySelectorAll) {
   const coarse = matchMedia("(any-pointer: coarse)");
@@ -1326,7 +1256,6 @@ if (touchDock?.querySelectorAll) {
       pauseGame();
   });
 }
-
 function pauseGame() {
   if (mode === "pause") {
     pauseState.deadline = 0;
@@ -1432,14 +1361,12 @@ function drawPause() {
   if (state.deadline && remaining <= 0 && !state.busy) resumeGame();
   drawToast();
 }
-
 function updateSync(t) {
   const active = tracks.filter((tr) => tr.notes.length);
   const complete = active.length > 0 && active.every((tr) => locked(tr, t));
   if (complete && !inSync) syncAt = rt;
   inSync = complete;
 }
-
 function logic(t) {
   const end = song.duration,
     upto = songTime(ac.currentTime - t0 + 0.1);
@@ -1476,35 +1403,31 @@ function logic(t) {
       tr.judged++;
       if (n.hit || n.missed) continue;
       n.missed = true;
-      if (tr === tracks[cur] && !auto(tr, n)) {
-        mult = 1;
-        misses++;
-        tr.misses++;
+      if (tr === tracks[run.currentTrack] && !auto(tr, n)) {
+        const penalty = recordMiss(run, tr);
         missAt = rt;
         shake = Math.max(shake, 3);
-        tr.live = false;
         popup(
           "MISS",
-          trackX(cur) + (n.lane - 1) * LW,
+          trackX(run.currentTrack) + (n.lane - 1) * LW,
           HIT_Y - 40,
           "#ff3355",
           14,
           0.5,
         );
-        changeGroove(-(4 + Math.min(++missStreak, 4)));
+        changeGroove(penalty);
         if (mode === "failed") return;
       }
     }
     const volume = locked(tr, t)
       ? LIVE
-      : tr === tracks[cur]
+      : tr === tracks[run.currentTrack]
         ? tr.live
           ? LIVE
           : CUE
         : GHOST;
     stemPlayer?.setLevel(trackIndex, volume);
   }
-
   updateSync(t);
   sched = upto;
   if (t > end + 1) {
@@ -1513,7 +1436,6 @@ function logic(t) {
     saveBest();
   }
 }
-
 function frame() {
   updateTouchControls();
   const wall = performance.now() / 1000,
@@ -1535,7 +1457,7 @@ function frame() {
       : (t - beats[bi]) / (beats[bi + 1] - beats[bi]);
   pulse = Math.exp(-phase * 5);
   camTo = playing
-    ? trackX(cur)
+    ? trackX(run.currentTrack)
     : reducedMotion?.matches
       ? 0
       : Math.sin(rt * 0.4) * 200;
@@ -1543,8 +1465,9 @@ function frame() {
     ? camTo
     : camX + (camTo - camX) * Math.min(1, fdt * 9);
   shake = Math.max(0, shake - fdt * 40);
-  const energy = playing ? 0.3 + (groove / 100) * 0.7 : 1;
-  const warp = (0.25 + pulse * 0.5 + (playing ? mult * 0.12 : 0)) * energy;
+  const energy = playing ? 0.3 + (run.groove / 100) * 0.7 : 1;
+  const warp =
+    (0.25 + pulse * 0.5 + (playing ? run.multiplier * 0.12 : 0)) * energy;
   for (const s of stars) {
     if (reducedMotion?.matches) break;
     s.z -= fdt * warp;
@@ -1563,11 +1486,10 @@ function frame() {
   parts = parts.filter((p) => rt - p.born < p.life);
   pops = pops.filter((p) => rt - p.born < p.life);
   rings = rings.filter((r) => rt - r.born < 0.7);
-  shown += (score - shown) * Math.min(1, fdt * 12);
+  shown += (run.score - shown) * Math.min(1, fdt * 12);
   draw(t, playing);
   requestAnimationFrame(frame);
 }
-
 // ---------- rendering ----------
 // Bend in projected depth: fixed at the hit line, bounded at the horizon.
 function P(x, dt) {
@@ -1604,7 +1526,6 @@ function text(s, x, y, font, color, align = "center", glow = 0) {
   g.fillText(s, x, y);
   g.shadowBlur = 0;
 }
-
 // One small, deterministic material per theme; never generate grain in the frame loop.
 const materialCache = new Map();
 function materialTexture(style = theme) {
@@ -1751,7 +1672,6 @@ function drawMaterial(vx, vy, t = 0, playing = false) {
   g.drawImage(surface, -100 + drift, -100 + drift * 0.4, W + 200, H + 200);
   g.restore();
 }
-
 // Capture timestamps already reset with the song: effects need no particle queues or timers.
 function drawCaptureMaterial(t, playing, vx, vy) {
   if (!playing || reducedMotion?.matches) return;
@@ -1820,7 +1740,6 @@ function drawCaptureMaterial(t, playing, vx, vy) {
   });
   g.restore();
 }
-
 // Capture strength follows the existing lock lifetime; scenery never outlives its instrument.
 function captureLight(tr, t) {
   if (!tr.notes.length || !locked(tr, t)) return 0;
@@ -1956,7 +1875,6 @@ function drawBuiltWorld(t, playing, vx, vy) {
   }
   g.restore();
 }
-
 function drawWorld(t, playing, vx, vy) {
   if (isPaper() || isCircuit()) return drawBuiltWorld(t, playing, vx, vy);
   if (isLiquid()) return drawLiquidWorld(t, playing, vx, vy);
@@ -2037,10 +1955,9 @@ function drawWorld(t, playing, vx, vy) {
   }
   g.restore();
 }
-
 // Keep the craft below the judgement line and above the keyboard hints.
 function craftX() {
-  if (!dash || reducedMotion?.matches) return trackX(cur);
+  if (!dash || reducedMotion?.matches) return trackX(run.currentTrack);
   const q = Math.max(0, Math.min(1, (rt - dash.at) / 0.16));
   return dash.from + (dash.to - dash.from) * (1 - (1 - q) ** 3);
 }
@@ -2049,7 +1966,7 @@ function drawCraft() {
     y = HIT_Y + 7,
     age = dash ? rt - dash.at : 1;
   const charge = flash ? Math.max(0, 1 - (rt - flash.born) / 1.2) : 0;
-  const color = charge ? flash.color : tracks[cur].color;
+  const color = charge ? flash.color : tracks[run.currentTrack].color;
   g.save();
   if (dash && age >= 0 && age < 0.24 && !reducedMotion?.matches) {
     g.globalAlpha = (1 - age / 0.24) * 0.45;
@@ -2153,7 +2070,10 @@ function drawCraft() {
     });
   }
   for (let lane = 0; lane < 3; lane++) {
-    const hit = Math.max(0, 1 - (rt - laneHit[cur * 3 + lane]) / 0.18),
+    const hit = Math.max(
+        0,
+        1 - (rt - laneHit[run.currentTrack * 3 + lane]) / 0.18,
+      ),
       ex = x + (lane - 1) * 22;
     g.globalAlpha = 0.4 + hit * 0.6;
     g.fillStyle = hit ? "#fff" : color;
@@ -2168,14 +2088,13 @@ function drawCraft() {
   }
   g.restore();
 }
-
 function draw(t, playing) {
   const b = bar(t),
     dh = ((((theme.hues[b % 4] - hue) % 360) + 540) % 360) - 180;
   hue += dh * 0.04;
   // slow sways locked to the bar grid (one long left-right swing per 16 bars), swooping harder as the multiplier climbs
   const u = barF(t);
-  bendAmp += ((playing ? 0.45 + mult * 0.07 : 0.6) - bendAmp) * 0.02;
+  bendAmp += ((playing ? 0.45 + run.multiplier * 0.07 : 0.6) - bendAmp) * 0.02;
   bendX =
     (reducedMotion?.matches ? 0 : 190) *
     bendAmp *
@@ -2194,12 +2113,11 @@ function draw(t, playing) {
   sky.addColorStop(0, `hsl(${hue},60%,4%)`);
   sky.addColorStop(
     HZ / H,
-    `hsl(${hue},70%,${(13 + pulse * 7) * (playing ? 0.35 + (groove / 100) * 0.65 : 1)}%)`,
+    `hsl(${hue},70%,${(13 + pulse * 7) * (playing ? 0.35 + (run.groove / 100) * 0.65 : 1)}%)`,
   );
   sky.addColorStop(1, "#030206");
   g.fillStyle = sky;
   g.fillRect(0, 0, W, H);
-
   // camera: shake + roll that leans into track switches
   const cameraShake = reducedMotion?.matches ? 0 : shake;
   g.translate(
@@ -2210,7 +2128,6 @@ function draw(t, playing) {
     reducedMotion?.matches ? 0 : (camX - camTo) * 0.0005 - bendX * 0.0003,
   );
   g.translate(-W / 2, -H / 2); // bank into the curve
-
   g.globalCompositeOperation = "lighter";
   g.lineWidth = 1.5;
   for (
@@ -2239,7 +2156,7 @@ function draw(t, playing) {
     g.stroke();
   }
   const core = g.createRadialGradient(vx, vy, 0, vx, vy, 150 + pulse * 50);
-  core.addColorStop(0, `hsla(${hue},90%,70%,${0.4 + mult * 0.03})`);
+  core.addColorStop(0, `hsla(${hue},90%,70%,${0.4 + run.multiplier * 0.03})`);
   core.addColorStop(1, "hsla(0,0%,0%,0)");
   g.fillStyle = core;
   g.fillRect(vx - 220, vy - 220, 440, 440);
@@ -2249,7 +2166,6 @@ function draw(t, playing) {
   g.arc(vx, vy, 20 + phase * 280, 0, 7);
   g.stroke();
   g.globalCompositeOperation = "source-over";
-
   const ground = g.createLinearGradient(0, vy, 0, H);
   ground.addColorStop(0, `hsla(${hue},60%,12%,.3)`);
   ground.addColorStop(0.12, "rgba(4,3,10,.94)");
@@ -2258,11 +2174,9 @@ function draw(t, playing) {
   g.fillRect(-200, vy, W + 400, H + 200);
   g.fillStyle = `hsla(${hue},90%,72%,${0.45 + pulse * 0.55})`;
   g.fillRect(-200, vy - 1, W + 400, 2);
-
   drawMaterial(vx, vy, t, playing);
   drawWorld(t, playing, vx, vy);
   drawCaptureMaterial(t, playing, vx, vy);
-
   const roadShade = g.createLinearGradient(0, P(0, LOOK)[1], 0, HIT_Y);
   roadShade.addColorStop(0, "rgba(3,7,16,0)");
   roadShade.addColorStop(0.25, "#030710");
@@ -2273,7 +2187,7 @@ function draw(t, playing) {
       x0 = cx - TW / 2,
       x1 = cx + TW / 2,
       capd = locked(tr, t),
-      me = i === cur && playing,
+      me = i === run.currentTrack && playing,
       since = rt - tr.capAt;
     // Shade the actual curved road, rather than cutting a straight wedge out of the scenery.
     g.globalCompositeOperation = "source-over";
@@ -2506,14 +2420,17 @@ function draw(t, playing) {
       });
     }
   });
-
-  if (playing && locked(tracks[cur], t) && !reducedMotion?.matches) {
-    const age = rt - tracks[cur].capAt,
+  if (
+    playing &&
+    locked(tracks[run.currentTrack], t) &&
+    !reducedMotion?.matches
+  ) {
+    const age = rt - tracks[run.currentTrack].capAt,
       right = next(1),
       target = right >= 0 ? right : next(-1);
     if (target >= 0 && age >= 0.65 && age < 1.35) {
       const q = (age - 0.65) / 0.7,
-        from = sx(trackX(cur)),
+        from = sx(trackX(run.currentTrack)),
         to = sx(trackX(target)),
         x = from + (to - from) * (1 - (1 - q) ** 3);
       g.globalAlpha = Math.sin(q * Math.PI) * 0.8;
@@ -2566,7 +2483,6 @@ function draw(t, playing) {
     );
   }
   g.globalAlpha = 1;
-
   // ---------- HUD (no camera transform) ----------
   g.setTransform(DPR, 0, 0, DPR, 0, 0);
   if (mode === "play") drawCraft();
@@ -2598,7 +2514,6 @@ function draw(t, playing) {
       "#fff",
     );
   if (!playing) return drawTitle();
-
   const arrival = entrance ? Math.max(0, rt - entrance.at) : 1;
   g.globalAlpha =
     entrance && t < 0 ? Math.max(0, Math.min(1, (arrival - 0.4) / 0.35)) : 1;
@@ -2612,18 +2527,21 @@ function draw(t, playing) {
     "left",
     10,
   );
-  const mc = mult === 1 ? "#bbb" : `hsl(${210 - mult * 25},100%,65%)`;
+  const mc =
+    run.multiplier === 1
+      ? "#bbb"
+      : `hsl(${210 - run.multiplier * 25},100%,65%)`;
   text(
-    `×${mult}`,
+    `×${run.multiplier}`,
     W - 24,
     62,
-    `italic 900 ${40 + pulse * mult}px ${SANS}`,
+    `italic 900 ${40 + pulse * run.multiplier}px ${SANS}`,
     mc,
     "right",
-    mult * 3,
+    run.multiplier * 3,
   );
   for (let k = 0; k < 8; k++) {
-    g.fillStyle = k < mult ? mc : "rgba(255,255,255,.15)";
+    g.fillStyle = k < run.multiplier ? mc : "rgba(255,255,255,.15)";
     g.fillRect(W - 24 - (8 - k) * 11, 74, 8, 4);
   }
   const end = song.duration,
@@ -2643,24 +2561,23 @@ function draw(t, playing) {
     `600 11px ${SANS}`,
     "rgba(255,255,255,.5)",
   );
-  const grooveColor = groove < 40 ? "#ff4d6d" : "#3ddc97";
+  const grooveColor = run.groove < 40 ? "#ff4d6d" : "#3ddc97";
   g.fillStyle = "rgba(255,255,255,.12)";
   g.fillRect(px + 50, 65, 200, 5);
   g.fillStyle = grooveColor;
-  g.fillRect(px + 50, 65, groove * 2, 5);
+  g.fillRect(px + 50, 65, run.groove * 2, 5);
   text(
-    `GROOVE ${Math.ceil(groove)}%${groove < 40 ? " · KEEP THE SONG ALIVE" : ""}`,
+    `GROOVE ${Math.ceil(run.groove)}%${run.groove < 40 ? " · KEEP THE SONG ALIVE" : ""}`,
     W / 2,
     88,
     `700 10px ${MONO}`,
     grooveColor,
   );
-
   tracks.forEach((tr, i) => {
     const x = 30 + i * 190,
       y = 560,
       capd = locked(tr, t),
-      me = i === cur;
+      me = i === run.currentTrack;
     g.fillStyle = capd ? tr.color + "40" : "rgba(255,255,255,.05)";
     g.beginPath();
     g.roundRect(x, y, 170, 26, 6);
@@ -2686,9 +2603,8 @@ function draw(t, playing) {
       me ? "#fff" : tr.notes.length ? tr.color : "rgba(255,255,255,.3)",
     );
   });
-
   g.globalAlpha = 1;
-  if (!playable(tracks[cur], t) && mode === "play") {
+  if (!playable(tracks[run.currentTrack], t) && mode === "play") {
     // this track is on autopilot: point at the tracks you can move to
     const a = 0.55 + 0.45 * pulse,
       l = next(-1),
@@ -2747,7 +2663,6 @@ function draw(t, playing) {
     if (arrival >= 0.75 || t >= 0) entrance = null;
   }
 }
-
 // ---------- title screen: grouped song list (left), the selected song (right), toast, keys for this screen ----------
 let zones = [],
   help = false,
@@ -2815,7 +2730,6 @@ function selectedTitle(s, x, y, w, font, color, entry) {
   text(s, x - shift, y, font, color, "left");
   g.restore();
 }
-
 function wrap(s, x, y, w, lh, font, color) {
   let line = "";
   for (const word of s.split(" ")) {
@@ -2870,7 +2784,6 @@ const JOB_LABEL = {
   chart: "charting",
   save: "saving",
 };
-
 function drawTitle() {
   zones = [];
   if (mode === "find") return drawFind();
@@ -2925,7 +2838,6 @@ function drawTitle() {
     "left",
   );
 }
-
 const LIST = { x: 32, y: 128, w: 372, h: 350 };
 function drawList() {
   const rows = [
@@ -3071,7 +2983,6 @@ function drawList() {
     });
   });
 }
-
 // Artwork uses the full chart, so changing difficulty never changes a song's sleeve.
 const sleeveCache = new WeakMap(),
   demoSleeve = demoSong();
@@ -3198,7 +3109,6 @@ function drawSleeve(source, x, y, w, h, active) {
   );
   g.restore();
 }
-
 const CARD = { x: 428, y: 128, w: 340, h: 400 };
 function drawCard() {
   const { x, y, w, h } = CARD,
@@ -3354,7 +3264,6 @@ function drawCard() {
   );
   cta(mode === "loading" ? "LOADING…" : "PLAY", start);
 }
-
 function drawToast() {
   const age = rt - toast.at;
   if (age > 4) return;
@@ -3371,7 +3280,6 @@ function drawToast() {
   text(s, x + 14, y + 21, f, "#fff", "left");
   g.globalAlpha = 1;
 }
-
 function drawHelp() {
   g.fillStyle = "rgba(3,2,6,.7)";
   g.fillRect(0, 0, W, H);
@@ -3435,7 +3343,6 @@ cv.addEventListener?.(
   "mousemove",
   (e) => (cv.style.cursor = zoneAt(...at(e)) ? "pointer" : "default"),
 );
-
 function drawFind() {
   g.fillStyle = "rgba(3,2,6,.72)";
   g.fillRect(0, 0, W, H);
@@ -3504,7 +3411,6 @@ function drawFind() {
     "rgba(255,255,255,.45)",
   );
 }
-
 function drawFailure() {
   g.globalAlpha = 1;
   g.fillStyle = "rgba(3,2,6,.9)";
@@ -3518,7 +3424,7 @@ function drawFailure() {
     "#fff",
   );
   text(
-    `${Math.min(100, Math.floor((failedAt / song.duration) * 100))}% COMPLETE · ${score.toLocaleString()} POINTS`,
+    `${Math.min(100, Math.floor((failedAt / song.duration) * 100))}% COMPLETE · ${run.score.toLocaleString()} POINTS`,
     W / 2,
     310,
     `600 15px ${MONO}`,
@@ -3542,9 +3448,8 @@ function drawFailure() {
     zone(220, y, 360, 44, () => action());
   });
 }
-
 function drawResults() {
-  const acc = hits / Math.max(1, hits + misses),
+  const acc = run.hits / Math.max(1, run.hits + run.misses),
     gr = grade(acc),
     record = best[`${playKey}:${level}`];
   const [title, artist = ""] = song.title.split(" — ");
@@ -3587,7 +3492,14 @@ function drawResults() {
     18,
   );
   text("SCORE", 752, 165, `700 10px ${MONO}`, "#a6b6c8", "right");
-  text(score.toLocaleString(), 752, 207, `700 34px ${MONO}`, "#fff", "right");
+  text(
+    run.score.toLocaleString(),
+    752,
+    207,
+    `700 34px ${MONO}`,
+    "#fff",
+    "right",
+  );
   text(
     `${(acc * 100).toFixed(1)}% ACCURACY`,
     752,
@@ -3596,10 +3508,17 @@ function drawResults() {
     "#a6b6c8",
     "right",
   );
-  text(`${caps} CAPTURES`, 752, 264, `600 12px ${MONO}`, "#a6b6c8", "right");
+  text(
+    `${run.captures} CAPTURES`,
+    752,
+    264,
+    `600 12px ${MONO}`,
+    "#a6b6c8",
+    "right",
+  );
   const totalTiming = tracks.reduce((sum, tr) => sum + tr.timing, 0);
   text(
-    hits ? `AVG ${timingLabel(totalTiming / hits)}` : "AVG TIMING —",
+    run.hits ? `AVG ${timingLabel(totalTiming / run.hits)}` : "AVG TIMING —",
     752,
     286,
     `600 11px ${MONO}`,
@@ -3670,13 +3589,11 @@ function drawResults() {
   shortcut("SPACE", "play again", 260, 558);
   shortcut("ESC", "song selection", 540, 558);
 }
-
 setGrid(song);
 tracks = buildTracks();
 rebuild();
 applyTheme(catalog[sel]);
 requestAnimationFrame(frame);
-
 // Self-check: every phrase of every demo chart has notes, no step is doubled, and the grid maps times to bars.
 ["drums", "bass", "arp", "lead"].forEach((k, i) => {
   const ns = chart(k, 7 + i * 101);
