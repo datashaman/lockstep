@@ -49,3 +49,9 @@ jobs:
 
       - name: Run Python regression tests
         run: python3 prep_test.py
+
+      - name: Install chart comparison dependencies
+        run: python3 -m pip install librosa==0.11.0
+
+      - name: Compare Python and browser charts
+        run: python3 chart_comparison_test.py
