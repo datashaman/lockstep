@@ -78,3 +78,7 @@ assert.deepEqual(Array.from(saved.pcm[0][0]), [-32767, 0, 16383, 32767]);
 assert.deepEqual(Array.from(saved.pcm[0][1]), [32767, -16383, 0, -32767]);
 assert.equal(saved.pcm[0][0].byteLength, 8, 'transfer is 16-bit, half the float stem size');
 console.log('ok: worker sends clipped 16-bit PCM without duplicate float stems');
+
+worker.caches = { open: async () => ({ match: async () => undefined }) };
+worker.fetch = async () => ({ ok: true, body: null });
+await assert.rejects(vm.runInContext('modelBytes(() => {})', worker), /Model download returned no body/);

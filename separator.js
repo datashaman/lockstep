@@ -20,7 +20,8 @@ async function modelBytes(post) {
   if (hit) return hit.arrayBuffer();
   const res = await fetch(MODEL);
   if (!res.ok) throw new Error(`model download failed: ${res.status}`);
-  const total = +res.headers.get("content-length") || 180e6,
+  if (!res.body) throw new Error("Model download returned no body.");
+  const total = Number(res.headers.get("content-length")) || 180e6,
     reader = res.body.getReader(),
     parts = [];
   for (let got = 0; ; ) {
@@ -73,7 +74,7 @@ workerScope.onmessage = ({ data: { id, left, right, stems: given } }) =>
       post("separate", 0);
       /** @type {import("./lib/worker").FloatStems} */
       const stems = await proc.separate(left, right);
-      left = right = null; // Input is no longer needed during charting and PCM packing.
+      left = right = undefined; // Input is no longer needed during charting and PCM packing.
       const song = analyze(stems, { onProgress: (p) => post("chart", p) });
       // Replace channels one at a time; never send the full float stems alongside their stored PCM copy.
       /** @type {Record<string,{left:Float32Array|Int16Array,right:Float32Array|Int16Array}>} */

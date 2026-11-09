@@ -127,8 +127,20 @@ const W = 800,
   LW = TW / 3;
 const SANS = "system-ui, sans-serif",
   MONO = "ui-monospace, Menlo, monospace";
-const cv = /** @type {HTMLCanvasElement} */ (document.getElementById("c")),
-  g = cv.getContext("2d"),
+/** @param {string} id */
+function requiredElement(id) {
+  const element = document.getElementById(id);
+  if (!element) throw new Error(`Missing required element: ${id}`);
+  return element;
+}
+/** @param {HTMLCanvasElement} canvas */
+function context2D(canvas) {
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas 2D is unavailable.");
+  return context;
+}
+const cv = /** @type {HTMLCanvasElement} */ (requiredElement("c")),
+  g = context2D(cv),
   DPR = Math.min(2, globalThis.devicePixelRatio || 1);
 cv.width = W * DPR;
 cv.height = H * DPR;
@@ -255,7 +267,7 @@ const now = () =>
           offset,
       );
 function setTempo(rate) {
-  if (tempo.at(-1).rate === rate) return;
+  if (tempo.at(-1)?.rate === rate) return;
   // Stay beyond the synth lookahead so already-scheduled notes never move.
   const at = ac.currentTime - t0 + 0.15,
     pos = songTime(at);
@@ -299,6 +311,7 @@ function phraseNotes(tr, phrase) {
   );
 }
 const stopStems = () => stemPlayer?.stop();
+/** @param {HTMLCanvasElement | null} [menuImage] */
 function reset(menuImage = null) {
   Object.assign(run, createRunState());
   setGrid(song);
@@ -514,7 +527,7 @@ async function start() {
   const menuImage = document.createElement("canvas");
   menuImage.width = cv.width;
   menuImage.height = cv.height;
-  menuImage.getContext("2d").drawImage(cv, 0, 0);
+  context2D(menuImage).drawImage(cv, 0, 0);
   mode = "loading";
   loadErr = "";
   playKey = songKey(e);
@@ -598,8 +611,9 @@ function setLevel(lv) {
 }
 // Add songs: decode -> separate + chart in a worker (separator.js) -> store stems as 16-bit PCM in IndexedDB.
 const AUDIO = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|aiff?|webm)$/i;
+/** @param {FileList | null | undefined} files */
 function addFiles(files) {
-  for (const f of files)
+  for (const f of files || [])
     if (f.type.startsWith("audio/") || AUDIO.test(f.name))
       jobs.push({
         title: f.name.replace(/\.[^.]+$/, ""),
@@ -631,6 +645,7 @@ async function nextJob() {
       return nextJob();
     }
     await importDuration(bytes);
+    /** @type {AudioBuffer | null} */
     let ab = await new OfflineAudioContext(2, 1, 44100).decodeAudioData(bytes); // resamples to the model's 44.1 kHz
     checkImportDuration(ab.duration);
     const left = ab.getChannelData(0).slice(),
@@ -642,6 +657,7 @@ async function nextJob() {
       [left.buffer, right.buffer],
       (d) => Object.assign(job, d),
     );
+    if (!pcm) throw new Error("Separator returned no audio.");
     job.phase = "save";
     await songLibrary.save(
       { id, title: job.title, url: j.url, song: meta, added: Date.now() },
@@ -681,13 +697,14 @@ async function removeSong(e) {
   showSelected();
   say(`deleted ${e.title}`, "info");
 }
-const picker = globalThis.document?.createElement
-  ? Object.assign(document.createElement("input"), {
-      type: "file",
-      accept: "audio/*",
-      multiple: true,
-    })
-  : { click() {}, onchange: null, files: null, value: "" };
+const picker =
+  typeof globalThis.document?.createElement === "function"
+    ? Object.assign(document.createElement("input"), {
+        type: "file",
+        accept: "audio/*",
+        multiple: true,
+      })
+    : { click() {}, onchange: null, files: null, value: "" };
 picker.onchange = () => {
   addFiles(picker.files);
   picker.value = "";
@@ -695,7 +712,7 @@ picker.onchange = () => {
 addEventListener("dragover", (e) => e.preventDefault());
 addEventListener("drop", (e) => {
   e.preventDefault();
-  addFiles(e.dataTransfer.files);
+  addFiles(e.dataTransfer?.files);
 });
 const libraryReady = songLibrary.available
   ? songLibrary
@@ -846,8 +863,11 @@ async function openSharedTrack(value) {
                 ? `${job.title} · ${JOB_LABEL[job.phase] || job.phase} · ${Math.round((job.progress || 0) * 100)}%`
                 : "Waiting to import…";
           }, 500);
-          entry = await new Promise((resolve, reject) =>
-            queueAudius(t, resolve, reject),
+          entry = await new Promise(
+            /** @param {(entry:import("./lib/song").SongEntry)=>void} resolve */ (
+              resolve,
+              reject,
+            ) => queueAudius(t, resolve, reject),
           );
         }
         if (!d.open) return; // Closing leaves the import running, but cancels automatic playback.
@@ -1089,7 +1109,7 @@ function bindTouchPad(button) {
   });
 }
 function updateTouchControls() {
-  if (!touchEnabled) return;
+  if (!touchEnabled || !touchDock) return;
   const songSelect = /** @type {HTMLSelectElement} */ (
     document.getElementById("touch-song")
   );
@@ -1120,17 +1140,17 @@ function updateTouchControls() {
   touchState = state;
   if (mode !== previousMode) {
     clearTouchPointers();
-    document.getElementById("touch-settings").hidden = true;
+    requiredElement("touch-settings").hidden = true;
   }
   for (const group of /** @type {NodeListOf<HTMLElement>} */ (
     touchDock.querySelectorAll("[data-screen]")
   ))
-    group.hidden = !group.dataset.screen.split(" ").includes(mode);
+    group.hidden = !(group.dataset.screen || "").split(" ").includes(mode);
   songSelect.value = String(menu.selected);
   /** @type {HTMLSelectElement} */ (
     document.getElementById("touch-level")
   ).value = String(level);
-  document.getElementById("touch-theme").textContent = `Theme: ${theme.name}`;
+  requiredElement("touch-theme").textContent = `Theme: ${theme.name}`;
   /** @type {HTMLButtonElement} */ (
     document.getElementById("touch-share")
   ).disabled = !audiusURL(menu.entries[menu.selected]?.url);
@@ -1140,7 +1160,7 @@ function updateTouchControls() {
   /** @type {HTMLButtonElement} */ (
     document.getElementById("touch-default")
   ).disabled = mode !== "title";
-  document.getElementById("touch-offset").textContent =
+  requiredElement("touch-offset").textContent =
     `Audio offset: ${Math.round(offset * 1000)} ms`;
   /** @type {HTMLButtonElement} */ (
     document.getElementById("touch-resume")
@@ -1178,7 +1198,7 @@ if (touchDock?.querySelectorAll) {
     touchDock.querySelectorAll("[data-settings]")
   ))
     button.addEventListener("click", () => {
-      const panel = document.getElementById("touch-settings");
+      const panel = requiredElement("touch-settings");
       panel.hidden = !panel.hidden;
     });
   /** @type {HTMLButtonElement} */ (
@@ -1199,15 +1219,13 @@ if (touchDock?.querySelectorAll) {
       ),
     );
   });
-  document
-    .getElementById("touch-level")
-    .addEventListener("change", (e) =>
-      setLevel(
-        Number(
-          /** @type {HTMLInputElement | HTMLSelectElement} */ (e.target).value,
-        ),
+  requiredElement("touch-level").addEventListener("change", (e) =>
+    setLevel(
+      Number(
+        /** @type {HTMLInputElement | HTMLSelectElement} */ (e.target).value,
       ),
-    );
+    ),
+  );
   /** @type {HTMLInputElement} */ (
     document.getElementById("touch-search")
   ).addEventListener("input", (e) => {
@@ -1219,7 +1237,7 @@ if (touchDock?.querySelectorAll) {
     peek?.pause();
     auTimer = setTimeout(auSearch, 300);
   });
-  document.getElementById("touch-find").addEventListener("submit", (e) => {
+  requiredElement("touch-find").addEventListener("submit", (e) => {
     e.preventDefault();
     /** @type {HTMLInputElement} */ (
       document.getElementById("touch-search")
@@ -1246,7 +1264,7 @@ function pauseGame() {
   const image = document.createElement("canvas");
   image.width = cv.width;
   image.height = cv.height;
-  image.getContext("2d").drawImage(cv, 0, 0);
+  context2D(image).drawImage(cv, 0, 0);
   const state = {
     image,
     at: performance.now() / 1000,
@@ -1266,6 +1284,7 @@ function pauseGame() {
     }
   });
 }
+/** @param {"restart" | "menu" | null} [action] */
 async function resumeGame(action = null) {
   const state = pauseState;
   if (!state || state.busy) return;
@@ -1481,13 +1500,17 @@ let themeShader = null,
   themeShaderRequested = false;
 function prepareThemeShader() {
   if (themeShader)
-    themeShader.select(Object.keys(THEMES).find((k) => THEMES[k] === theme));
+    themeShader.select(
+      Object.keys(THEMES).find((k) => THEMES[k] === theme) ?? "neon",
+    );
   if (themeShaderRequested || !globalThis.WebGLRenderingContext) return;
   themeShaderRequested = true;
   import("./theme-shaders.js")
     .then((m) => {
       themeShader = m.createThemeShader();
-      themeShader?.select(Object.keys(THEMES).find((k) => THEMES[k] === theme));
+      themeShader?.select(
+        Object.keys(THEMES).find((k) => THEMES[k] === theme) ?? "neon",
+      );
     })
     .catch(() => {});
 }
@@ -1668,7 +1691,7 @@ function drawTitle() {
 }
 const LIST = { x: 32, y: 128, w: 372, h: 350 };
 function drawList() {
-  /** @type {{hdr?:string,e?:import("./lib/song").SongEntry,j?:{title:string,phase:string,progress?:number},note?:string,y?:number,h?:number}[]} */
+  /** @type {{hdr?:string,e?:import("./lib/song").SongEntry,j?:{title:string,phase:string,progress?:number},note?:string}[]} */
   const rows = [
     { hdr: "YOUR LIBRARY" },
     ...menu.library.map((e) => ({ e })),
@@ -1683,12 +1706,13 @@ function drawList() {
     ...menu.server.map((e) => ({ e })),
   );
   let total = 0;
-  for (const r of rows) {
-    r.y = total;
-    r.h = r.hdr ? 28 : r.j ? 40 : 32;
-    total += r.h;
-  }
-  const at = rows.find((r) => r.e === menu.entries[menu.selected]);
+  const laidOut = rows.map((r) => {
+    const y = total,
+      h = r.hdr ? 28 : r.j ? 40 : 32;
+    total += h;
+    return { ...r, y, h };
+  });
+  const at = laidOut.find((r) => r.e === menu.entries[menu.selected]);
   if (at)
     listScroll +=
       (Math.max(0, Math.min(total - LIST.h, at.y + at.h / 2 - LIST.h / 2)) -
@@ -1698,7 +1722,7 @@ function drawList() {
   g.beginPath();
   g.rect(LIST.x - 4, LIST.y, LIST.w + 8, LIST.h);
   g.clip();
-  for (const r of rows) {
+  for (const r of laidOut) {
     const y = LIST.y + r.y - listScroll,
       L = LIST.x,
       R = LIST.x + LIST.w;
@@ -1748,7 +1772,7 @@ function drawList() {
       box(L + 14, y + 28, R - L - 24, 3, 1.5, "rgba(255,255,255,.12)");
       if (r.j.phase !== "queued")
         box(L + 14, y + 28, (R - L - 24) * p, 3, 1.5, `hsl(${hue},90%,72%)`);
-    } else {
+    } else if (r.e) {
       const e = r.e,
         on = e === menu.entries[menu.selected],
         a = about(e),
