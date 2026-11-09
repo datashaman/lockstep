@@ -63,3 +63,30 @@ vm.runInContext(`
   pick(1); assert.equal(delArm, -9, 'changing songs disarms delete confirmation');
 `, context);
 console.log('ok: simultaneous pads, immediate audio-clock input, no duplicate clicks, pointer cancellation, track switching, pause gating, keyboard activation, native search and touch calibration');
+
+vm.runInContext(`
+  assert.throws(() => context2D({ getContext: () => null }), /Canvas 2D is unavailable/);
+  const originalGetElement = document.getElementById;
+  document.getElementById = () => null;
+  assert.throws(() => requiredElement('missing'), /Missing required element: missing/);
+  document.getElementById = originalGetElement;
+`, context);
+assert.doesNotThrow(() => handlers.drop({ preventDefault() {}, dataTransfer: null }));
+context.crypto = { subtle: { digest: async () => new Uint8Array([1, 2]).buffer } };
+context.OfflineAudioContext = class {
+  async decodeAudioData() { return { duration: 2, numberOfChannels: 1, getChannelData: () => new Float32Array(4) }; }
+};
+await vm.runInContext(`
+  (async () => {
+    importDuration = async () => {};
+    work = async () => ({ song: {} });
+    let saves = 0, failure;
+    songLibrary.save = async () => saves++;
+    menu.library = [];
+    jobs.push({ title: 'missing PCM', bytes: async () => new ArrayBuffer(4), failed: error => failure = error });
+    await nextJob();
+    assert.equal(saves, 0, 'missing audio must not save an incomplete song');
+    assert.match(failure.message, /Separator returned no audio/);
+    assert.equal(job, null, 'failed import releases the queue');
+  })()
+`, context);

@@ -30,7 +30,7 @@ A UI framework would mainly affect menus, settings and dialogs. It would not rep
 
 ## Limits and next triggers
 
-This is a refactor, not a finished architecture. `app.js` still owns substantial coordination and menu artwork. Its nullable lifecycle state and inferred parameters are checked in a less strict browser project; the extracted modules, renderer and shaders retain strict checks. Existing integration tests still use a VM harness for application-level behavior.
+This is a refactor, not a finished architecture. `app.js` still owns substantial coordination and menu artwork. Its browser project enables strict null checking but still permits implicit `any` for legacy lifecycle state and inferred parameters; the extracted modules, renderer and shaders retain strict checks. Existing integration tests still use a VM harness for application-level behavior.
 
 Revisit a framework when the product needs multiple substantial DOM screens, reusable forms, routing or accessibility behavior that repeatedly requires custom synchronization. First prototype one library/settings screen against the existing menu state. Keep audio scheduling and animation outside framework render cycles. Adopt only if that prototype measurably simplifies changes and preserves keyboard, touch and assistive-technology behavior.
 
