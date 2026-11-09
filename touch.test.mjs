@@ -90,3 +90,4 @@ await vm.runInContext(`
     assert.equal(job, null, 'failed import releases the queue');
   })()
 `, context);
+await assert.rejects(vm.runInContext("decodeSong({ title: 'broken', lib: 'missing-chart' })", context), /missing its chart/);

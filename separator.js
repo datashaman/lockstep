@@ -44,8 +44,9 @@ const f2i = (a) => {
   return o;
 };
 
-let proc,
-  queue = Promise.resolve();
+/** @type {DemucsProcessor | undefined} */
+let proc;
+let queue = Promise.resolve();
 workerScope.onmessage = ({ data: { id, left, right, stems: given } }) =>
   (queue = queue.then(async () => {
     /** @param {"model"|"separate"|"chart"} phase @param {number} progress */
@@ -70,7 +71,8 @@ workerScope.onmessage = ({ data: { id, left, right, stems: given } }) =>
         await candidate.loadModel(await modelBytes(post));
         proc = candidate;
       }
-      proc.onProgress = (p) => post("separate", p.progress);
+      proc.onProgress = (/** @type {{progress:number}} */ p) =>
+        post("separate", p.progress);
       post("separate", 0);
       /** @type {import("./lib/worker").FloatStems} */
       const stems = await proc.separate(left, right);

@@ -22,6 +22,7 @@ The refactor provides narrower places to change behavior:
 | Shader lifetime and theme materials | `shader-renderer.js`, `theme-shaders.js` |
 | Audio graphs, recorded sources and previews | `lib/audio-engine.js`, `lib/stem-player.js` |
 | Storage, imports and timing calculations | Other focused modules in `lib/` |
+| Audio suspension, resume and countdown state | `lib/pause-session.js` |
 | Scheduling, animation updates, jobs and screen composition | `app.js` |
 
 The renderer reads an explicit frame; it does not advance scoring or capture state. Audio and storage modules do not import the app. Input interpretation and gameplay calculations can be tested without a browser. Catalog selection and stale-search handling have independent tests.
@@ -30,11 +31,11 @@ A UI framework would mainly affect menus, settings and dialogs. It would not rep
 
 ## Limits and next triggers
 
-This is a refactor, not a finished architecture. `app.js` still owns substantial coordination and menu artwork. Its browser project enables strict null checking but still permits implicit `any` for legacy lifecycle state and inferred parameters; the extracted modules, renderer and shaders retain strict checks. Existing integration tests still use a VM harness for application-level behavior.
+This is a refactor, not a finished architecture. `app.js` still owns substantial coordination and menu artwork. Its browser project now enables strict null and implicit-any checking, matching the extracted modules, renderer and shaders. Existing integration tests still use a VM harness for application-level behavior.
 
 Revisit a framework when the product needs multiple substantial DOM screens, reusable forms, routing or accessibility behavior that repeatedly requires custom synchronization. First prototype one library/settings screen against the existing menu state. Keep audio scheduling and animation outside framework render cycles. Adopt only if that prototype measurably simplifies changes and preserves keyboard, touch and assistive-technology behavior.
 
-Before another broad extraction, favor specific changes driven by difficulty modifying a feature. Suitable remaining boundaries include import-job lifecycle and pause/resume coordination; do not split files merely to meet a line-count target.
+Before another broad extraction, favor specific changes driven by difficulty modifying a feature. Pause/resume audio coordination now has its own tested session module. Import-job lifecycle remains a possible boundary; do not split files merely to meet a line-count target.
 
 ## Validation and rollout
 

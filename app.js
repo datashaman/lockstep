@@ -1,4 +1,13 @@
 // @ts-check
+/** @typedef {import('./lib/song').SongEntry} SongEntry */
+/** @typedef {import('./lib/song').SongChart} SongChart */
+/** @typedef {import('./lib/song').PlayableSong} PlayableSong */
+/** @typedef {import('./lib/song').Note} Note */
+/** @typedef {import('./lib/gameplay.js').GameTrack} GameTrack */
+/** @typedef {import('./lib/input-actions.js').InputAction} InputAction */
+/** @typedef {{key:string,shiftKey?:boolean,ctrlKey?:boolean,metaKey?:boolean,repeat?:boolean,target?:EventTarget|null,preventDefault?:()=>void}} KeyInput */
+/** @typedef {string|CanvasGradient|CanvasPattern} CanvasStyle */
+import { createPauseSession } from "./lib/pause-session.js";
 import { createSceneRenderer } from "./lib/scene-renderer.js";
 import { createSongMenu, createTrackDialog } from "./lib/song-menu.js";
 import {
@@ -60,6 +69,7 @@ const CHORDS = [
 ]; // Am F C G
 const HUES = [275, 215, 185, 325]; // sky tint per chord
 const COLORS = ["#ff4d6d", "#ffb703", "#3ddc97", "#4cc9f0"];
+/** @type {Record<string,import("./lib/scene").Theme>} */
 const THEMES = {
   neon: { name: "Neon", colors: COLORS, hues: HUES },
   liquid: {
@@ -78,8 +88,9 @@ const THEMES = {
     hues: [225, 245, 215, 260],
   },
 };
-let themeSettings = { default: "neon", songs: {} },
-  theme = THEMES.neon;
+/** @type {{default:string,songs:Record<string,string>}} */
+let themeSettings = { default: "neon", songs: {} };
+let theme = THEMES.neon;
 try {
   const saved = JSON.parse(globalThis.localStorage?.lockstepThemes || "{}");
   if (
@@ -97,6 +108,7 @@ try {
 const isLiquid = () => theme === THEMES.liquid;
 const isPaper = () => theme === THEMES.paper;
 const isCircuit = () => theme === THEMES.circuit;
+/** @param {SongEntry} e */
 function applyTheme(e) {
   const key = themeSettings.songs[songKey(e || DEMO)] || themeSettings.default;
   theme = Object.hasOwn(THEMES, key) ? THEMES[key] : THEMES.neon;
@@ -147,9 +159,11 @@ cv.height = H * DPR;
 const reducedMotion = globalThis.matchMedia?.(
   "(prefers-reduced-motion: reduce)",
 );
+/** @param {number} seed */
 function rng(seed) {
   return () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
 }
+/** @type {Record<string,(step:number,random:()=>number)=>number>} */
 const PICK = {
   drums: (s, r) => {
     const m = s % 16;
@@ -167,7 +181,8 @@ const PICK = {
   lead: (s, r) => (s % 2 === 0 && r() < 0.35 ? Math.floor(r() * 3) : -1),
 };
 // One 2-bar phrase per 8-bar section, repeated 4x, so the player can learn it.
-/** @returns {import('./lib/song').Note[]} */
+/** @returns {import('./lib/song').Note[]}
+ * @param {string} kind @param {number} seed */
 function chart(kind, seed) {
   const r = rng(seed);
   /** @type {import('./lib/song').Note[]} */
@@ -203,15 +218,20 @@ const demoSong = () => ({
   ].map(([name, kind], i) => ({ name, kind, notes: chart(kind, 7 + i * 101) })),
 });
 // ---------- state ----------
-let ac,
-  audio,
-  stemPlayer,
-  previewPlayer,
-  t0,
-  sched,
+/** @type {AudioContext} */
+let ac;
+/** @type {ReturnType<typeof createAudioEngine>} */
+let audio;
+/** @type {ReturnType<typeof createStemPlayer>} */
+let stemPlayer;
+/** @type {ReturnType<typeof createStemPlayer>} */
+let previewPlayer;
+let t0 = 0,
+  sched = 0,
   song = demoSong(),
-  tracks,
   overAt = 0;
+/** @type {import('./lib/gameplay.js').GameTrack[]} */
+let tracks = [];
 /** @type {import("./lib/input-actions.js").Screen} */
 let mode = "title";
 let loadErr = "";
@@ -222,7 +242,11 @@ function clampOffset(value) {
 }
 let offset = clampOffset(+(globalThis.localStorage?.lockstepOffset || 0)),
   offsetAt = -9; // player's audio calibration, seconds
-let beats, bars, gridDown;
+/** @type {number[]} */
+let beats = [];
+/** @type {number[]} */
+let bars = [];
+let gridDown = 0;
 let shown = 0,
   rt = 0,
   last = performance.now() / 1000,
@@ -235,20 +259,28 @@ let camX = 0,
   bendAmp = 0.6,
   hue = HUES[0],
   shake = 0,
-  missAt = -9,
-  flash = null;
-let dash = null,
-  entrance = null,
-  inSync = false,
+  missAt = -9;
+/** @type {import("./lib/scene").SceneFrame["flash"]} */
+let flash = null;
+/** @type {import("./lib/scene").SceneFrame["dash"]} */
+let dash = null;
+/** @type {import("./lib/scene").SceneFrame["entrance"]} */
+let entrance = null;
+let inSync = false,
   syncAt = -9;
-let pauseState = null,
-  visualOffset = 0;
+/** @typedef {ReturnType<typeof createPauseSession<HTMLCanvasElement>>} PauseState */
+/** @type {PauseState | null} */
+let pauseState = null;
+let visualOffset = 0;
 let failedAt = 0;
 let tempo = [{ at: 0, pos: 0, rate: 1 }];
-let parts = [],
-  pops = [],
-  rings = [],
-  press = [-9, -9, -9],
+/** @type {import("./lib/scene").Particle[]} */
+let parts = [];
+/** @type {import("./lib/scene").Popup[]} */
+let pops = [];
+/** @type {{x:number,born:number,color:string}[]} */
+let rings = [];
+let press = [-9, -9, -9],
   laneHit = new Array(12).fill(-9);
 const stars = Array.from({ length: 220 }, () => ({
   x: Math.random() * 2 - 1,
@@ -259,7 +291,9 @@ const LIVE = 1,
   CUE = 0.35,
   GHOST = 0.2; // stem volume: playing well / your track before a hit / other tracks (GHOST high enough to mask separation artifacts)
 // One piecewise-linear transport drives stems, synth scheduling and judgement.
+/** @param {number} elapsed */
 const songTime = (elapsed) => songPosition(tempo, elapsed);
+/** @param {number} position */
 const audioTime = (position) => t0 + audioElapsed(tempo, position);
 const now = () =>
   mode === "failed"
@@ -270,6 +304,7 @@ const now = () =>
           (ac.outputLatency || ac.baseLatency || 0) -
           offset,
       );
+/** @param {number} rate */
 function setTempo(rate) {
   if (tempo.at(-1)?.rate === rate) return;
   // Stay beyond the synth lookahead so already-scheduled notes never move.
@@ -278,6 +313,7 @@ function setTempo(rate) {
   tempo.push({ at, pos, rate });
   stemPlayer?.setRate(rate, t0 + at);
 }
+/** @param {number} amount */
 function changeGroove(amount) {
   const rate = applyGroove(run, amount);
   if (!run.groove) {
@@ -293,21 +329,30 @@ function changeGroove(amount) {
   setTempo(rate);
 }
 const auto = isAutomatic;
+/** @param {GameTrack} tr @param {number} t */
 const locked = (tr, t) => bar(t) < tr.capTo;
+/** @param {GameTrack} tr @param {number} t */
 const captureRemaining = (tr, t) =>
   Math.max(0, Math.min(1, (tr.capTo - barF(t)) / CAPTURE_BARS));
+/** @param {number} i */
 const trackX = (i) => (i - 1.5) * (TW + GAP);
 // Beat grid: the song's beats, extended back through the count-in and forward past the end.
+/** @param {PlayableSong} song */
 function setGrid(song) {
   ({ beats, bars, downbeat: gridDown } = extendBeatGrid(song, LEAD_IN, LOOK));
 }
 const idx = beatIndex;
+/** @param {number} time */
 const barF = (time) => fractionalBar(bars, time);
+/** @param {number} time */
 const bar = (time) => Math.floor(barF(time));
+/** @param {number} time */
 const slot = (time) => beatSlot(beats, time);
+/** @param {Note[]} notes @param {number} level */
 const thin = (notes, level) => thinChart(notes, level, beats);
 const buildTracks = () =>
   createTracks(song.tracks, theme.colors, level, beats, bars);
+/** @param {GameTrack} tr @param {number} phrase */
 function phraseNotes(tr, phrase) {
   return tr.notes.slice(
     noteIndex(tr.notes, phrase ? bars[phrase * 2] : -Infinity),
@@ -351,19 +396,27 @@ const DEMO = { title: "Demo (synth)" },
   FIND = { title: "Find on Audius", find: true };
 const songMenu = createSongMenu(DEMO, ADD, FIND);
 const menu = songMenu.state;
-let job = null,
-  jobs = [],
-  worker,
-  delArm = -9,
+/** @typedef {{title:string,phase:string,progress:number}} ImportStatus */
+/** @typedef {{title:string,bytes:()=>Promise<ArrayBuffer>,url?:string,done?:(entry:import('./lib/song').SongEntry)=>void,failed?:(error:unknown)=>void}} ImportJob */
+/** @type {ImportStatus | null} */
+let job = null;
+/** @type {ImportJob[]} */
+let jobs = [];
+/** @type {Worker | null} */
+let worker = null;
+let delArm = -9,
   CHART_V = 0;
+/** @param {SongEntry} e */
 const songKey = (e) => e.lib || e.slug || "demo";
 // Best score per song and difficulty: a per-player convenience, so localStorage (losing it costs nothing but bragging rights).
-let best = {},
-  playKey = "demo",
+/** @type {Record<string,{score:number,grade:string}>} */
+let best = {};
+let playKey = "demo",
   newBest = false;
 try {
   best = JSON.parse(globalThis.localStorage?.lockstepBest || "{}");
 } catch {}
+/** @param {number} acc */
 const grade = (acc) =>
   acc >= 0.95
     ? "S"
@@ -429,31 +482,37 @@ function work(msg, transfer = [], onProgress) {
       for (const p of pending.values())
         p.no(new Error(e.message || "separator failed to start"));
       pending.clear();
-      worker.terminate();
+      worker?.terminate();
       worker = null;
     };
   }
+  const activeWorker = worker;
   return new Promise(
     /** @param {(result:import("./lib/worker").WorkerDone)=>void} ok */ (
       ok,
       no,
     ) => {
       pending.set(msg.id, { ok, no, onProgress });
-      worker.postMessage(msg, transfer);
+      activeWorker.postMessage(msg, transfer);
     },
   ).finally(releaseWorker);
 }
 let toast = { s: "", kind: "ok", at: -9 };
+/** @param {string} s */
 const say = (s, kind = "ok") => (toast = { s, kind, at: rt }); // kind: ok | info | err
 const rebuild = () => songMenu.rebuild();
 const songLibrary = createSongLibrary();
+/** @param {Int16Array} a */
 const i2f = (a, o = new Float32Array(a.length)) => {
   for (let i = 0; i < a.length; i++) o[i] = a[i] / 32767;
   return o;
 };
+/** @param {ArrayBuffer} b */
 const hex = (b) =>
   [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+/** @type {WeakMap<SongEntry,Promise<PlayableSong>>} */
 const songLoads = new WeakMap();
+/** @param {SongEntry} e */
 function loadSong(e) {
   if (e.song) return Promise.resolve(e.song);
   if (!songLoads.has(e))
@@ -470,10 +529,12 @@ function loadSong(e) {
         })
         .finally(() => songLoads.delete(e)),
     );
-  return songLoads.get(e);
+  return /** @type {Promise<PlayableSong>} */ (songLoads.get(e));
 }
+/** @param {SongEntry} e */
 async function decodeSong(e) {
   if (e.lib) {
+    if (!e.meta) throw new Error("Saved song is missing its chart.");
     const pcm = await songLibrary.loadAudio(e.lib);
     if (CHART_V && e.meta.v !== CHART_V) {
       // charted by an older analyze.js: re-chart from the saved stems (seconds, no re-separation)
@@ -506,6 +567,7 @@ async function decodeSong(e) {
   const base = `songs/${e.slug}/`,
     res = await fetch(base + "song.json");
   if (!res.ok) throw new Error(`${base}song.json: ${res.status}`);
+  /** @type {PlayableSong} */
   const s = await res.json();
   s.buffers = await Promise.all(
     s.tracks.map(async (tr) =>
@@ -557,9 +619,11 @@ function toTitle() {
 // The title screen's backdrop is the selected song: its chart scrolls behind the menu and its stems play quietly, looping from ~30 s in.
 let pvT0 = 0,
   pvFrom = 0,
-  pvFor = null,
-  pvTimer,
   pvN = 0;
+/** @type {import("./lib/song").SongEntry | null} */
+let pvFor = null;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let pvTimer;
 const stopPreview = () => previewPlayer?.stop();
 function showSelected() {
   clearTimeout(pvTimer);
@@ -600,6 +664,7 @@ const attract = () => {
   );
   return pvFrom + (el % Math.max(1, song.duration - pvFrom));
 };
+/** @param {number} i */
 const pick = (i) => {
   if (songMenu.select(i)) {
     delArm = -9;
@@ -607,6 +672,7 @@ const pick = (i) => {
     showSelected();
   }
 };
+/** @param {number} lv */
 function setLevel(lv) {
   level = Math.max(0, Math.min(2, lv));
   if (globalThis.localStorage) localStorage.lockstepLevel = level;
@@ -638,6 +704,7 @@ async function nextJob() {
   } // j: { title, bytes: () => Promise<ArrayBuffer>, url? (where it came from) }
   job = { title: j.title, phase: j.url ? "download" : "decode", progress: 0 };
   try {
+    /** @type {ArrayBuffer | null} */
     let bytes = await j.bytes();
     checkImportSize(bytes.byteLength);
     job.phase = "decode";
@@ -659,7 +726,9 @@ async function nextJob() {
     const { song: meta, pcm } = await work(
       { id, left, right },
       [left.buffer, right.buffer],
-      (d) => Object.assign(job, d),
+      (d) => {
+        if (job) Object.assign(job, d);
+      },
     );
     if (!pcm) throw new Error("Separator returned no audio.");
     job.phase = "save";
@@ -682,7 +751,9 @@ async function nextJob() {
   }
   nextJob();
 }
+/** @param {SongEntry} e */
 async function removeSong(e) {
+  if (!e.lib) return;
   try {
     await songLibrary.remove(e.lib);
   } catch (err) {
@@ -749,8 +820,10 @@ fetch("songs/index.json")
 const audius = createAudiusClient((url) => fetch(url));
 const search = createTrackSearch(audius, () => preview());
 const au = search.state;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
 let auTimer;
 const peek = globalThis.Audio ? new Audio() : null;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
 let peekTimer;
 function preview() {
   // stream the highlighted track from a little way in, once the selection settles; stops outside the finder
@@ -765,6 +838,7 @@ function preview() {
   }, 400);
 }
 const auSearch = () => search.search();
+/** @param {KeyInput} e */
 function findKey(e) {
   const t = au.list[au.sel];
   if (e.key === "Escape") {
@@ -793,6 +867,7 @@ function findKey(e) {
   preview();
 }
 // Share only Audius provenance; no audio or local filenames leave this device.
+/** @param {SongEntry|undefined} e */
 function shareLink(e) {
   const track = audiusURL(e?.url);
   if (!track) return null;
@@ -802,8 +877,10 @@ function shareLink(e) {
   u.searchParams.set("audius", track);
   return u.href;
 }
+/** @param {string} title @param {string} message */
 const trackDialog = (title, message) =>
   createTrackDialog(document, title, message);
+/** @param {SongEntry} e */
 async function shareTrack(e) {
   const url = shareLink(e);
   if (!url) return;
@@ -824,17 +901,20 @@ async function shareTrack(e) {
     input.select();
   }
 }
+/** @param {import("./lib/song").AudiusTrack} t @param {ImportJob["done"]} [done] @param {ImportJob["failed"]} [failed] */
 function queueAudius(t, done, failed) {
   jobs.push({
     title: `${t.title} — ${t.user.name}`,
-    url: audiusURL(`https://audius.co${t.permalink}`),
+    url: audiusURL(`https://audius.co${t.permalink}`) ?? undefined,
     done,
     failed,
     bytes: () => audius.download(t.id),
   });
   if (!job) nextJob();
 }
+/** @param {string} value */
 const resolveSharedTrack = (value) => audius.resolve(value);
+/** @param {string} value */
 async function openSharedTrack(value) {
   const { d, status, close } = trackDialog(
     "Shared track",
@@ -911,6 +991,7 @@ function initAudio() {
   previewPlayer = createStemPlayer(ac, audio.output);
 }
 // ---------- fx (x is in hit-plane world space: screen x = W/2 + x - camX) ----------
+/** @param {number} x @param {number} y @param {string} color @param {number} n @param {number} power */
 function burst(x, y, color, n, power, spread = 0) {
   for (let k = 0; k < n; k++) {
     const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4,
@@ -928,12 +1009,16 @@ function burst(x, y, color, n, power, spread = 0) {
   }
   if (parts.length > 800) parts.splice(0, parts.length - 800);
 }
+/** @param {string} text @param {number} x @param {number} y @param {string} color @param {number} size */
 const popup = (text, x, y, color, size, life = 0.7) =>
   pops.push({ text, x, y, color, size, life, born: rt });
 // ---------- gameplay ----------
 // Switching is always the player's call: A/D goes to the nearest non-silent track that way, including auto tracks (no wrap-around), or nowhere.
+/** @param {GameTrack} tr @param {number} t */
 const playable = (tr, t) => tr.notes.length && !locked(tr, t);
+/** @param {number} dir */
 const next = (dir) => nextTrack(tracks, run.currentTrack, dir);
+/** @param {number} dir */
 function move(dir) {
   const j = next(dir);
   if (j < 0) return;
@@ -942,10 +1027,12 @@ function move(dir) {
   tracks[run.currentTrack].live = false;
   run.currentTrack = j;
 }
+/** @param {number} delta */
 const timingLabel = (delta) =>
   Math.abs(delta) < 0.0005
     ? "ON TIME"
     : `${Math.round(Math.abs(delta) * 1000)} ms ${delta < 0 ? "EARLY" : "LATE"}`;
+/** @param {number} lane */
 function tryHit(lane) {
   press[lane] = rt;
   const tr = tracks[run.currentTrack],
@@ -957,7 +1044,8 @@ function tryHit(lane) {
   const { perfect, grooveGain } = recordHit(run, tr, n, delta, PERFECT);
   const x = trackX(run.currentTrack) + (lane - 1) * LW;
   changeGroove(grooveGain);
-  if (song.synth) audio.playNote(tr.kind, lane, n.bar, ac.currentTime);
+  if (song.synth && tr.kind)
+    audio.playNote(tr.kind, lane, n.bar, ac.currentTime);
   burst(x, HIT_Y, tr.color, perfect ? 18 : 9, 1);
   laneHit[run.currentTrack * 3 + lane] = rt;
   popup(
@@ -983,6 +1071,7 @@ function tryHit(lane) {
   }
 }
 /** @param {import('./lib/input-actions').InputAction} action */
+/** @param {InputAction} action */
 function dispatchAction(action) {
   switch (action.type) {
     case "calibrate":
@@ -993,7 +1082,7 @@ function dispatchAction(action) {
       if (globalThis.localStorage) localStorage.lockstepOffset = offset;
       break;
     case "resume":
-      if (pauseState.deadline) pauseState.deadline = 0;
+      if (pauseState?.deadline) pauseState.deadline = 0;
       else resumeCountdown();
       break;
     case "restart":
@@ -1057,9 +1146,11 @@ function dispatchAction(action) {
       break;
   }
 }
+/** @param {KeyInput} e */
 function handleKey(e) {
-  if (e.target?.closest?.("input, select, textarea")) return;
-  if ((e.key === " " || e.key === "Enter") && e.target?.closest?.("button"))
+  const target = /** @type {Element | null | undefined} */ (e.target);
+  if (target?.closest?.("input, select, textarea")) return;
+  if ((e.key === " " || e.key === "Enter") && target?.closest?.("button"))
     return;
   if (e.metaKey || e.ctrlKey || document.querySelector?.("dialog[open]"))
     return;
@@ -1083,15 +1174,18 @@ function handleKey(e) {
 addEventListener("keydown", handleKey);
 // Native controls stay outside the canvas, so fingers never cover the timing line.
 const touchDock = document.getElementById("touch-controls");
+/** @type {Map<number,HTMLElement>} */
 const touchPointers = new Map();
 let touchEnabled = false,
-  touchCatalog = null,
   touchState = "";
+/** @type {import("./lib/song").SongEntry[] | null} */
+let touchCatalog = null;
 function clearTouchPointers() {
   for (const button of touchPointers.values())
     button.classList.remove("pressed");
   touchPointers.clear();
 }
+/** @param {HTMLElement} button */
 function bindTouchPad(button) {
   button.addEventListener("pointerdown", (e) => {
     if (mode !== "play" || e.button > 0 || touchPointers.has(e.pointerId))
@@ -1100,18 +1194,22 @@ function bindTouchPad(button) {
     button.setPointerCapture(e.pointerId);
     touchPointers.set(e.pointerId, button);
     button.classList.add("pressed");
-    handleKey({ key: button.dataset.pad });
+    handleKey({ key: button.dataset.pad || "" });
   });
-  const release = (e) => {
+  const release = (/** @type {PointerEvent} */ e) => {
     touchPointers.delete(e.pointerId);
     if (![...touchPointers.values()].includes(button))
       button.classList.remove("pressed");
   };
-  for (const event of ["pointerup", "pointercancel", "lostpointercapture"])
+  for (const event of /** @type {const} */ ([
+    "pointerup",
+    "pointercancel",
+    "lostpointercapture",
+  ]))
     button.addEventListener(event, release);
   button.addEventListener("click", (e) => {
     if (e.detail === 0 && mode === "play")
-      handleKey({ key: button.dataset.pad });
+      handleKey({ key: button.dataset.pad || "" });
   });
 }
 function updateTouchControls() {
@@ -1197,7 +1295,7 @@ if (touchDock?.querySelectorAll) {
     touchDock.querySelectorAll("[data-key]")
   ))
     button.addEventListener("click", () => {
-      handleKey({ key: button.dataset.key });
+      handleKey({ key: button.dataset.key || "" });
       updateTouchControls();
     });
   for (const button of /** @type {NodeListOf<HTMLElement>} */ (
@@ -1263,7 +1361,7 @@ if (touchDock?.querySelectorAll) {
 }
 function pauseGame() {
   if (mode === "pause") {
-    pauseState.deadline = 0;
+    if (pauseState) pauseState.deadline = 0;
     return;
   }
   if (mode !== "play") return;
@@ -1271,15 +1369,15 @@ function pauseGame() {
   image.width = cv.width;
   image.height = cv.height;
   context2D(image).drawImage(cv, 0, 0);
-  const state = {
-    image,
-    at: performance.now() / 1000,
-    deadline: 0,
-    busy: false,
-  };
+  /** @type {PauseState} */
+  const state = createPauseSession(ac, image, {
+    now: () => performance.now() / 1000,
+    hidden: () => document.hidden,
+    current: () => pauseState === state,
+  });
   pauseState = state;
   mode = "pause";
-  state.ready = ac.suspend().catch((err) => {
+  state.ready = state.ready.catch((err) => {
     if (pauseState === state) {
       mode = "play";
       pauseState = null;
@@ -1294,25 +1392,15 @@ function pauseGame() {
 async function resumeGame(action = null) {
   const state = pauseState;
   if (!state || state.busy) return;
-  state.busy = true;
-  await state.ready;
-  if (pauseState !== state) return;
   try {
-    await ac.resume();
-    if (document.hidden) {
-      await ac.suspend();
-      state.busy = false;
-      state.deadline = 0;
-      return;
-    }
-    visualOffset += performance.now() / 1000 - state.at;
+    const pausedFor = await state.resume();
+    if (pausedFor === null) return;
+    visualOffset += pausedFor;
     pauseState = null;
     mode = "play";
     if (action === "restart") reset();
     else if (action === "menu") toTitle();
   } catch (err) {
-    state.busy = false;
-    state.deadline = 0;
     say(
       `could not resume: ${err instanceof Error ? err.message : String(err)}`,
       "err",
@@ -1320,19 +1408,14 @@ async function resumeGame(action = null) {
   }
 }
 function resumeCountdown() {
-  if (
-    pauseState &&
-    !pauseState.busy &&
-    !pauseState.deadline &&
-    !document.hidden
-  )
-    pauseState.deadline = performance.now() / 1000 + 3;
+  pauseState?.countdown();
 }
 document.addEventListener?.("visibilitychange", () => {
   if (document.hidden) pauseGame();
 });
 function drawPause() {
   const state = pauseState;
+  if (!state) return;
   g.setTransform(DPR, 0, 0, DPR, 0, 0);
   g.globalAlpha = 1;
   g.drawImage(state.image, 0, 0, W, H);
@@ -1357,11 +1440,11 @@ function drawPause() {
   );
   zones = [];
   if (!state.deadline && !state.busy) {
-    [
+    /** @type {[string,string,()=>void][]} */ ([
       ["SPACE / ENTER", "Resume", resumeCountdown],
       ["R", "Restart", () => resumeGame("restart")],
       ["ESC", "Song selection", () => resumeGame("menu")],
-    ].forEach(([key, label, fn], i) => {
+    ]).forEach(([key, label, fn], i) => {
       const y = 325 + i * 54;
       box(220, y, 360, 44, 8, "rgba(255,255,255,.08)", "rgba(255,255,255,.2)");
       shortcut(key, label, W / 2, y + 28);
@@ -1373,12 +1456,14 @@ function drawPause() {
   if (state.deadline && remaining <= 0 && !state.busy) resumeGame();
   drawToast();
 }
+/** @param {number} t */
 function updateSync(t) {
   const active = tracks.filter((tr) => tr.notes.length);
   const complete = active.length > 0 && active.every((tr) => locked(tr, t));
   if (complete && !inSync) syncAt = rt;
   inSync = complete;
 }
+/** @param {number} t */
 function logic(t) {
   const end = song.duration,
     upto = songTime(ac.currentTime - t0 + 0.1);
@@ -1405,7 +1490,8 @@ function logic(t) {
         k++
       ) {
         const n = tr.notes[k];
-        if (auto(tr, n)) audio.playNote(tr.kind, n.lane, n.bar, audioTime(n.t));
+        if (auto(tr, n) && tr.kind)
+          audio.playNote(tr.kind, n.lane, n.bar, audioTime(n.t));
       }
     const judgedAt = audioTime(t);
     while (tr.judged < tr.notes.length) {
@@ -1502,8 +1588,9 @@ function frame() {
   draw(t, playing);
   requestAnimationFrame(frame);
 }
-let themeShader = null,
-  themeShaderRequested = false;
+/** @type {ReturnType<typeof import("./theme-shaders.js").createThemeShader>} */
+let themeShader = null;
+let themeShaderRequested = false;
 function prepareThemeShader() {
   if (themeShader)
     themeShader.select(
@@ -1521,10 +1608,13 @@ function prepareThemeShader() {
     .catch(() => {});
 }
 // ---------- title screen: grouped song list (left), the selected song (right), toast, keys for this screen ----------
-let zones = [],
-  help = false,
+/** @type {{x:number,y:number,w:number,h:number,fn:()=>void}[]} */
+let zones = [];
+let help = false,
   listScroll = 0; // zones: clickable boxes from the last title frame
+/** @param {number} x @param {number} y @param {number} w @param {number} h @param {()=>void} fn */
 const zone = (x, y, w, h, fn) => zones.push({ x, y, w, h, fn });
+/** @param {number} x @param {number} y @param {number} w @param {number} h @param {number} r @param {CanvasStyle|null} fill @param {CanvasStyle} [stroke] */
 function box(x, y, w, h, r, fill, stroke) {
   g.beginPath();
   g.roundRect(x, y, w, h, r);
@@ -1538,17 +1628,21 @@ function box(x, y, w, h, r, fill, stroke) {
     g.stroke();
   }
 }
+/** @param {string} s @param {string} font */
 const tw = (s, font) => {
   g.font = font;
   return g.measureText(s).width || 0;
 };
+/** @param {string} s @param {number} w @param {string} font */
 function fit(s, w, font) {
   if (tw(s, font) <= w) return s;
   while (s.length > 1 && tw(s + "…", font) > w) s = s.slice(0, -1);
   return s + "…";
 }
-let titleEntry = null,
-  titleStarted = 0;
+/** @type {import("./lib/song").SongEntry | null} */
+let titleEntry = null;
+let titleStarted = 0;
+/** @param {number} width @param {number} viewport @param {number} elapsed */
 function titleOffset(width, viewport, elapsed, still = false) {
   const overflow = Math.max(0, width - viewport);
   if (!overflow) return 0;
@@ -1569,6 +1663,7 @@ function titleOffset(width, viewport, elapsed, still = false) {
   if (phase < 2 * hold + travel) return overflow;
   return overflow - (phase - 2 * hold - travel) * 28;
 }
+/** @param {string} s @param {number} x @param {number} y @param {number} w @param {string} font @param {string} color @param {SongEntry} entry */
 function selectedTitle(s, x, y, w, font, color, entry) {
   if (titleEntry !== entry) {
     titleEntry = entry;
@@ -1587,6 +1682,7 @@ function selectedTitle(s, x, y, w, font, color, entry) {
   text(s, x - shift, y, font, color, "left");
   g.restore();
 }
+/** @param {string} s @param {number} x @param {number} y @param {number} w @param {number} lh @param {string} font @param {string} color */
 function wrap(s, x, y, w, lh, font, color) {
   let line = "";
   for (const word of s.split(" ")) {
@@ -1598,6 +1694,7 @@ function wrap(s, x, y, w, lh, font, color) {
   }
   text(line, x, y, font, color, "left");
 }
+/** @param {string} k @param {number} x @param {number} y */
 function keycap(k, x, y) {
   const f = `800 10px ${MONO}`,
     w = Math.max(18, tw(k, f) + 10);
@@ -1605,13 +1702,16 @@ function keycap(k, x, y) {
   text(k, x + w / 2, y, f, "#fff");
   return x + w + 6;
 }
+/** @param {string} k @param {string} label @param {number} x @param {number} y */
 function shortcut(k, label, x, y, font = `700 14px ${MONO}`, color = "#fff") {
   const width =
     Math.max(18, tw(k, `800 10px ${MONO}`) + 10) + 6 + tw(label, font);
   text(label, keycap(k, x - width / 2, y), y, font, color, "left");
 }
+/** @param {number} s */
 const mmss = (s) =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+/** @param {SongEntry} e */
 function about(e) {
   // what the list and card can show without loading the song
   const [name, artist = ""] = e.title.split(" — ");
@@ -1619,7 +1719,7 @@ function about(e) {
     name,
     artist,
     dur: e.lib
-      ? e.meta.duration
+      ? e.meta?.duration
       : e === DEMO
         ? BARS * BARLEN
         : e.song?.duration,
@@ -1632,6 +1732,7 @@ function about(e) {
           : "built in · synthesised live",
   };
 }
+/** @type {Record<string,string>} */
 const JOB_LABEL = {
   queued: "queued",
   download: "downloading",
@@ -1676,7 +1777,7 @@ function drawTitle() {
   const e = menu.entries[menu.selected],
     y = H - 13;
   let x = 34;
-  const hint = (k, s) => {
+  const hint = (/** @type {string} */ k, /** @type {string} */ s) => {
     x = keycap(k, x, y);
     text(s, x, y, `600 11px ${MONO}`, "rgba(255,255,255,.6)", "left");
     x += tw(s, `600 11px ${MONO}`) + 18;
@@ -1847,8 +1948,10 @@ function drawList() {
   });
 }
 // Artwork uses the full chart, so changing difficulty never changes a song's sleeve.
-const sleeveCache = new WeakMap(),
-  demoSleeve = demoSong();
+/** @type {WeakMap<SongChart|PlayableSong,number[][]>} */
+const sleeveCache = new WeakMap();
+const demoSleeve = demoSong();
+/** @param {SongChart|PlayableSong|null|undefined} source */
 function sleeveBands(source) {
   if (!source) return [];
   if (!sleeveCache.has(source))
@@ -1867,8 +1970,9 @@ function sleeveBands(source) {
         return bins.map((n) => n / peak);
       }),
     );
-  return sleeveCache.get(source);
+  return sleeveCache.get(source) || [];
 }
+/** @param {SongChart|PlayableSong|null|undefined} source @param {number} x @param {number} y @param {number} w @param {number} h @param {boolean} active */
 function drawSleeve(source, x, y, w, h, active) {
   const bands = sleeveBands(source),
     beat = active && !reducedMotion?.matches ? pulse : 0;
@@ -1949,7 +2053,7 @@ function drawSleeve(source, x, y, w, h, active) {
       });
     g.globalAlpha = 1;
     text(
-      source.tracks[i].name + (bins.some((n) => n > 0) ? "" : " · SILENT"),
+      source?.tracks[i].name + (bins.some((n) => n > 0) ? "" : " · SILENT"),
       x + 12,
       y + 22 + i * 17,
       `700 9px ${MONO}`,
@@ -1980,7 +2084,7 @@ function drawCard() {
     R = x + w - 22;
   box(x, y, w, h, 14, "rgba(20,12,34,.8)", "rgba(255,255,255,.12)");
   if (!e) return;
-  const cta = (label, fn) => {
+  const cta = (/** @type {string} */ label, /** @type {()=>void} */ fn) => {
     const by = y + h - 66,
       gr = g.createLinearGradient(L, 0, R, 0);
     gr.addColorStop(0, "#ff4d6d");
@@ -2181,6 +2285,7 @@ function drawHelp() {
   zones = [{ x: 0, y: 0, w: W, h: H, fn: () => (help = false) }];
 }
 // Mouse: click a song to select it, again to play; the buttons, difficulty switch and PLAY all click too.
+/** @param {MouseEvent} e @returns {[number,number]} */
 const at = (e) => {
   const r = cv.getBoundingClientRect();
   return [
@@ -2188,6 +2293,7 @@ const at = (e) => {
     ((e.clientY - r.top) * H) / r.height,
   ];
 };
+/** @param {number} x @param {number} y */
 const zoneAt = (x, y) =>
   mode === "title" || mode === "pause" || mode === "failed"
     ? zones.findLast(
@@ -2241,7 +2347,8 @@ function drawFind() {
     au.err ? "#ff4466" : "rgba(255,255,255,.5)",
   );
   const top = Math.max(0, Math.min(au.sel - 4, au.list.length - 9)),
-    clip = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
+    clip = (/** @type {string} */ t, /** @type {number} */ n) =>
+      t.length > n ? t.slice(0, n - 1) + "…" : t;
   au.list.slice(top, top + 9).forEach((t, k) => {
     const on = top + k === au.sel,
       y = 220 + k * 30;
@@ -2538,6 +2645,7 @@ const {
   drawWorld,
   drawCraft,
 } = scene;
+/** @param {number} t @param {boolean} playing */
 function draw(t, playing) {
   const b = bar(t),
     dh = ((((theme.hues[b % 4] - hue) % 360) + 540) % 360) - 180;
@@ -2589,6 +2697,7 @@ console.assert(
 );
 {
   // difficulty: easy <= 1 note per beat and >= ~a beat apart; normal has no 16ths and leaves the 8th-note demo charts untouched
+  /** @type {Note[]} */
   const n16 = [
     [0, 0],
     [STEP, 1],
