@@ -60,8 +60,8 @@ The refactor separates storage, import validation, timing calculations, synthesi
 
 Keep the existing browser runtime for now. [The framework decision](FRAMEWORK-DECISION.md) records the rationale, current limits and concrete triggers for reconsidering a framework for DOM screens.
 
-## Chart pipeline comparison
+## Shared chart engine
 
-Run `python3 -m pip install librosa==0.11.0` and `python3 chart_comparison_test.py` (also run in CI). The check decodes the shipped `synth-test` stems once, feeds the same audio to the browser analyzer and Python charting functions, and checks tempo, beat coverage, grid agreement within 20 ms, and valid ordered notes. It does not run Demucs or encode output files.
+Both browser imports and `prep.py` use `analyze.js`. Python handles separation, 44.1 kHz decoding and output files; `scripts/chart-stems.mjs` transports its decoded mono stems to the analyzer. Offline preparation therefore requires Node.js 24 as well as the Python audio dependencies and ffmpeg. Browser defaults and chart version are unchanged; regenerating an offline chart adopts the browser's audibility gate and bar-phase selection.
 
-The pipelines share a song format, not identical musical output. On this fixture both find 100 BPM, with beat grids within 9 ms, but bars differ by about 1.2 seconds. Python/browser note counts are approximately DRUMS 96/190, BASS 41/24, VOCALS 181/1 and HARMONY 109/102. Browser analysis uses different onset features, a mix-relative audibility gate and low-band flux for bar phase. Note counts and bar differences are reported, not asserted as parity. Changing either algorithm to match the other requires a musical-quality decision and, for browser chart changes, a chart-version bump. This single synthetic fixture does not establish equivalence on real music.
+Run `python3 -m pip install librosa==0.11.0` and `python3 chart_comparison_test.py` (also run in CI). It compares exact chart output through the Python bridge and direct browser-engine calls using the shipped synthetic stems, and exercises BPM/density overrides. The separate `analyze.test.mjs` checks known synthetic timing, lanes and bleed suppression. Identical decoded stems now yield identical charts; different separation models or lossy encodings can still change their inputs. Neither check establishes musical quality on every recording.
