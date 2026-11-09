@@ -28,7 +28,7 @@ const context = vm.createContext({
 });
 const source = readFileSync(new URL('./index.html', import.meta.url), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 // Allow the import tests to replace the IndexedDB boundary without a browser database.
-vm.runInContext(source.replace('const idb =', 'let idb ='), context);
+vm.runInContext(source.replace('const idb =', 'let idb =').replace('const saveSong =', 'let saveSong ='), context);
 vm.runInContext(`
   for (const vertical of [-81, -50, 0, 50, 81]) {
     bendY = vertical; bendX = 170; camX = 291;
@@ -475,6 +475,12 @@ for (const key of ['paper', 'circuit']) {
 }
 console.log('ok: four-theme cycle, new theme persistence, rendering, unchanged chart data and static scenery');
 
+motion.matches = true; calls = [];
+vm.runInContext(`song = demoSong(); tracks = buildTracks(); shake = 12; camX = 100; camTo = -100; draw(12, true); assert.equal(bendX, 0); assert.equal(bendY, 0);`, context);
+assert.ok(calls.filter(c => c[0] === 'rotate').every(c => c[1] === 0), 'reduced motion disables camera banking');
+assert.ok(calls.some(c => c[0] === 'translate' && c[1] === 400 && c[2] === 300), 'camera stays centered despite shake');
+motion.matches = false;
+
 context.location = { href: 'https://game.example/lockstep/?old=1#old' };
 await vm.runInContext(`(async () => {
   assert.equal(shareLink({ title: 'local file' }), null);
@@ -495,18 +501,19 @@ await vm.runInContext(`(async () => {
 
   // Exercise real import completion, duplicate detection and error propagation.
   crypto = { subtle: { digest: async () => new Uint8Array(32).buffer } };
-  OfflineAudioContext = class { async decodeAudioData() { return { numberOfChannels: 1, getChannelData: () => new Float32Array(4) }; } };
+  OfflineAudioContext = class { async decodeAudioData() { return { duration: 120, numberOfChannels: 1, getChannelData: () => new Float32Array(4) }; } };
   navigator = { storage: {} };
   const writes = [];
-  idb = async (...args) => writes.push(args);
+  saveSong = async (...args) => writes.push(args);
+  importDuration = async () => {};
   work = async () => ({ song: { bpm: 120, tracks: [] }, stems: {} });
   library = []; jobs = []; job = null;
   let imported;
   jobs.push({ title: 'Shared song', url: sourceURL, bytes: async () => new ArrayBuffer(4), done: e => imported = e });
-  await nextJob(); assert.equal(imported.url, sourceURL); assert.equal(library.length, 1); assert.equal(writes.length, 2); assert.equal(job, null);
+  await nextJob(); assert.equal(imported.url, sourceURL); assert.equal(library.length, 1); assert.equal(writes.length, 1); assert.equal(job, null);
   let duplicate;
   jobs.push({ title: 'Shared song', bytes: async () => new ArrayBuffer(4), done: e => duplicate = e });
-  await nextJob(); assert.equal(duplicate, imported); assert.equal(writes.length, 2);
+  await nextJob(); assert.equal(duplicate, imported); assert.equal(writes.length, 1);
   let failure;
   jobs.push({ title: 'Broken', bytes: async () => { throw Error('offline'); }, failed: e => failure = e });
   await nextJob(); assert.equal(failure.message, 'offline'); assert.equal(job, null);

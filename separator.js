@@ -2,12 +2,10 @@
 // in:  { id, left, right }  stereo Float32Array @ 44.1 kHz (transferred) — separate + chart
 //  or  { id, stems }  already-separated stems — re-chart only (no model needed)
 // out: { id, type: 'progress', phase: 'model' | 'separate' | 'chart', progress }  then  { id, type: 'done', song, stems }  or  { id, type: 'error', message }
-import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.all.mjs';
 import { DemucsProcessor, CONSTANTS } from './vendor/demucs-web/index.js';
 import { analyze } from './analyze.js';
 
 const MODEL = CONSTANTS.DEFAULT_MODEL_URL; // ~180 MB HTDemucs ONNX on Hugging Face; cached after the first download
-ort.env.wasm.numThreads = self.crossOriginIsolated ? navigator.hardwareConcurrency : 1; // threads need COOP/COEP; WebGPU doesn't
 
 async function modelBytes(post) {
   const cache = await caches.open('lockstep-models');
@@ -28,10 +26,14 @@ onmessage = ({ data: { id, left, right, stems: given } }) => queue = queue.then(
   try {
     if (given) return postMessage({ id, type: 'done', song: analyze(given, { onProgress: p => post('chart', p) }) });
     if (!proc) {
-      proc = new DemucsProcessor({ ort, onProgress: p => post('separate', p.progress) });
+      const ort = await import('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.all.mjs');
+      ort.env.wasm.numThreads = self.crossOriginIsolated ? navigator.hardwareConcurrency : 1;
+      const candidate = new DemucsProcessor({ ort });
       post('model', 0);
-      await proc.loadModel(await modelBytes(post));
+      await candidate.loadModel(await modelBytes(post));
+      proc = candidate;
     }
+    proc.onProgress = p => post('separate', p.progress);
     post('separate', 0);
     const stems = await proc.separate(left, right);
     const song = analyze(stems, { onProgress: p => post('chart', p) });

@@ -6,10 +6,12 @@ A browser rhythm game where each instrument in a song is its own track. Hit a tr
 part in; nail a phrase to lock it and move to the next track. Inspired by the rhythm-action games of the
 PS2 era.
 
-Drop any audio file on the title screen and it is split into drums, bass, vocals and harmony
+Drop an audio file on the title screen and it is split into drums, bass, vocals and harmony
 ([Demucs](https://github.com/facebookresearch/demucs), run in your browser on WebGPU), then charted
 automatically. Your songs never leave your machine: separation runs locally and the result is kept in
 the browser's own storage.
+
+New imports are temporarily disabled on iPhone/iPad until separation is validated within real-device memory limits; existing library and built-in songs remain playable. On other devices, imports must be 1 second–10 minutes and at most 64 MiB. Duration is checked before decoding, and oversized downloads are stopped. These limits bound input size but do not guarantee separation will fit every device; the model and full-song stems still need substantial memory.
 
 No file handy? Pick **Find a song on Audius** on the title screen to browse trending tracks or type to search
 [Audius](https://audius.co), then press Enter to add one. Tracks stream straight from Audius and are used under the
@@ -58,12 +60,15 @@ Your best grade and score for each song and difficulty are kept in this browser.
 ## Offline charting (optional)
 
 `prep.py` does the same separation and charting in Python and writes `songs/<slug>/` for songs served
-with the game. Setup: `uv venv && uv pip install demucs librosa soundfile`, plus `ffmpeg` on PATH; run with `.venv/bin/python prep.py song.mp3`.
+with the game. Stem caches are keyed by the source audio hash. Reusing a title with different audio is rejected; choose a different `--title`. Existing output directories without a source hash are also protected from overwriting. Setup: `uv venv && uv pip install demucs librosa soundfile`, plus `ffmpeg` on PATH; run with `.venv/bin/python prep.py song.mp3`.
 Do not commit songs you don't own the rights to; `.gitignore` keeps everything but the generated test song out.
 
 ## Test
 
 ```sh
+node --test *.test.mjs  # all JavaScript regression checks
+python3 prep_test.py    # source identity and output collision checks
+
 node analyze.test.mjs   # charting against synthetic stems with a known grid
 node separation.test.mjs # chunk tensor cleanup, reconstruction and failure paths
 node render.test.mjs    # gameplay and renderer checks
