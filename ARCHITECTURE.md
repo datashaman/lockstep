@@ -59,3 +59,9 @@ New module tests should import the real module and exercise its public interface
 The refactor separates storage, import validation, timing calculations, synthesized audio and recorded-stem playback from application coordination. Input routing, gameplay rules, catalog/search state and scene rendering now have explicit interfaces. The app still coordinates playback, import jobs, animation and screen composition. The remaining type work is to tighten the entry point’s nullable lifecycle state and inferred parameters; the existing strict library check must stay enabled.
 
 Keep the existing browser runtime for now. [The framework decision](FRAMEWORK-DECISION.md) records the rationale, current limits and concrete triggers for reconsidering a framework for DOM screens.
+
+## Chart pipeline comparison
+
+Run `python3 -m pip install librosa==0.11.0` and `python3 chart_comparison_test.py` (also run in CI). The check decodes the shipped `synth-test` stems once, feeds the same audio to the browser analyzer and Python charting functions, and checks tempo, beat coverage, grid agreement within 20 ms, and valid ordered notes. It does not run Demucs or encode output files.
+
+The pipelines share a song format, not identical musical output. On this fixture both find 100 BPM, with beat grids within 9 ms, but bars differ by about 1.2 seconds. Python/browser note counts are approximately DRUMS 96/190, BASS 41/24, VOCALS 181/1 and HARMONY 109/102. Browser analysis uses different onset features, a mix-relative audibility gate and low-band flux for bar phase. Note counts and bar differences are reported, not asserted as parity. Changing either algorithm to match the other requires a musical-quality decision and, for browser chart changes, a chart-version bump. This single synthetic fixture does not establish equivalence on real music.

@@ -1,5 +1,5 @@
 // @ts-check
-// Browser port of prep.py's charting: beat grid + one note chart per stem, from separated stems.
+// Browser charting inspired by prep.py; same song format, different onset and audibility heuristics.
 // Input: stems as { drums, bass, vocals, other } -> { left, right } Float32Array at 44.1 kHz.
 // Output: the same song shape prep.py writes ({ duration, beats, downbeat, tracks: [{ name, notes: [[t, lane]] }] }).
 import { fft } from "./vendor/demucs-web/fft.js";
