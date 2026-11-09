@@ -16,7 +16,7 @@ Imports remain available on iPhone/iPad and other devices. Files must be 1 secon
 No file handy? Pick **Find a song on Audius** on the title screen to browse trending tracks or type to search
 [Audius](https://audius.co), then press Enter to add one. Tracks stream straight from Audius and are used under the
 [Audius Open Music License](https://openaudiofoundation.org/open-music-license.pdf); each one keeps its artist's
-name and a link back to the track.
+name and a link back to the track. Only tracks between 30 seconds and 10 minutes are listed or imported.
 
 ## Run
 
@@ -31,16 +31,19 @@ The first song you add downloads the ~180 MB separation model once.
 
 | Key | Title screen | In game |
 | --- | --- | --- |
-| ↑ ↓ | pick a song (it plays quietly behind the menu) | |
-| ← → | difficulty | switch track (also A / D) |
+| ↑ ↓ (or W / S) | pick a song (it plays quietly behind the menu) | |
+| ← → (or A / D) | difficulty | switch track |
 | Enter / Space | play | |
 | O | add audio files (or drop them anywhere) | |
 | F | find a song on Audius: type to search, ↑ ↓ previews, Enter adds, Esc back | |
-| X twice | delete a song | |
-| `[` `]` | audio offset | |
-| ? | all controls | |
+| X twice (or Delete / Backspace) | delete a song | |
+| C | share the selected Audius track | |
+| `[` `]` | audio offset, 10 ms per press | audio offset, 10 ms per press |
+| ? (or /) | all controls | |
 | J K L | | hit lanes |
 | Space / Esc | | pause |
+
+On the results screen, Enter / Space retries and Esc returns to song selection.
 
 Choose a song’s look with **T** or the theme button on its sleeve: **Neon**, **Liquid Dream**, **Paper City** or **Circuit Cathedral**. **Shift+T** (or the default control beneath the sleeve) makes the current look the default for songs without a saved choice. Theme choices stay in this browser and do not change charts or timing.
 
@@ -107,7 +110,7 @@ Circuit Cathedral adds stained-glass facets, dark leading, travelling etched-cir
 
 Landscape tablets get a touch dock below the game, keeping fingers away from the timing line. Left / Middle / Right hit the three lanes immediately on touch-down and accept simultaneous touches. Separate Track arrows switch instruments; Pause opens resume, restart and song-selection controls. Rotating into portrait while playing pauses the game.
 
-The dock also offers native song and difficulty selectors, Audius search, file import, theme switching and Audius sharing. Settings contains audio calibration (±10 ms), default theme and the existing two-step song deletion. Keyboard controls remain available. Touch controls appear on devices advertising a coarse pointer; buttons have at least 44-pixel targets and the layout accounts for screen safe areas.
+The dock also offers native song and difficulty selectors, Audius search, file import, theme switching and Audius sharing. Settings contains audio calibration (−10 ms / +10 ms steps), default theme and the existing two-step song deletion. Keyboard controls remain available. Touch controls appear on devices advertising a coarse pointer; buttons have at least 44-pixel targets and the layout accounts for screen safe areas.
 
 This is the landscape-tablet pass. Phone menus retain the scaled two-panel canvas; portrait shows landscape guidance. Real-device touch/audio latency and mobile stem-separation limits still need testing. Keep the browser foregrounded while importing a track.
 
