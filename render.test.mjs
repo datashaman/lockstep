@@ -309,6 +309,33 @@ vm.runInContext(`
 console.log('ok: signed timing, perfect/early/late feedback, calibration, unchanged scoring, stray exclusion and reset');
 
 vm.runInContext(`
+  pauseState = null; song = demoSong(); song.synth = false; ac = { currentTime: 0 }; reset(); t0 = 0; offset = 0;
+  mode = 'play'; cur = 0; rt = 150;
+  tracks[0].notes = [2, 4, 6, 8, 10].map(t => ({ t, lane: 0, bar: 0, hit: false, missed: false }));
+  const judged = () => pops.filter(p => /PERFECT|EARLY|LATE|ON TIME/.test(p.text)).at(-1).text;
+  const savedNow = performance.now;
+  let wall = 0;
+  performance.now = () => wall;
+  // The handler runs at audio time \${at} s (performance.now() in step); the key went down at \${pressed} s.
+  const pressAt = (at, pressed) => {
+    wall = 1000 + at * 1000; ac.currentTime = at;
+    handleKey({ key: 'j', timeStamp: pressed === undefined ? undefined : 1000 + pressed * 1000 });
+  };
+  pressAt(2.05, 2);
+  assert.equal(judged(), 'PERFECT'); assert.ok(Math.abs(tracks[0].timing) < 1e-9, 'judged at the key press: delta 0');
+  pressAt(4.15, 4);
+  assert.equal(judged(), 'PERFECT'); assert.ok(Math.abs(tracks[0].timing) < 1e-9, 'a press handled 150 ms late is still on time');
+  pressAt(6.05);
+  assert.equal(judged(), '50 ms LATE', 'without an event time, judged when handled, as before');
+  pressAt(8.05, 8.2);
+  assert.equal(judged(), '50 ms LATE', 'an event time ahead of the clock is not trusted');
+  offset = .02; ac.outputLatency = .03; pressAt(10.1, 10.05);
+  assert.equal(judged(), 'PERFECT', 'output latency and calibration apply as in now()');
+  performance.now = savedNow; offset = 0;
+`, context);
+console.log('ok: presses are judged at their event time; no event time keeps judging when handled');
+
+vm.runInContext(`
   pauseState = null; song = demoSong(); song.synth = false;
   ac = { currentTime: 0 }; offset = 0; reset(); t0 = 0;
   const rateEvents = [], stopped = [];

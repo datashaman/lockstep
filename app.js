@@ -5,7 +5,7 @@
 /** @typedef {import('./lib/song').Note} Note */
 /** @typedef {import('./lib/gameplay.js').GameTrack} GameTrack */
 /** @typedef {import('./lib/input-actions.js').InputAction} InputAction */
-/** @typedef {{key:string,shiftKey?:boolean,ctrlKey?:boolean,metaKey?:boolean,repeat?:boolean,target?:EventTarget|null,preventDefault?:()=>void}} KeyInput */
+/** @typedef {{key:string,shiftKey?:boolean,ctrlKey?:boolean,metaKey?:boolean,repeat?:boolean,timeStamp?:number,target?:EventTarget|null,preventDefault?:()=>void}} KeyInput */
 /** @typedef {string|CanvasGradient|CanvasPattern} CanvasStyle */
 import { createPauseSession } from "./lib/pause-session.js";
 import { createSceneRenderer } from "./lib/scene-renderer.js";
@@ -327,6 +327,23 @@ const now = () =>
           (ac.outputLatency || ac.baseLatency || 0) -
           offset,
       );
+/** Song position when an input event happened, so a slow frame or a busy main thread cannot
+ * make a press late: now() less the event's age. (Mapping through getOutputTimestamp() instead
+ * shifts Safari by its output latency, ~28 ms, which would invalidate saved calibration.)
+ * Null, meaning use now(), without a usable event time.
+ * @param {number} [timeStamp] the event's `timeStamp`, on the performance.now() clock */
+function pressedSongTime(timeStamp) {
+  if (mode === "failed" || !timeStamp) return null;
+  const age = (performance.now() - timeStamp) / 1000;
+  if (!(age >= 0)) return null;
+  return songTime(
+    ac.currentTime -
+      age -
+      t0 -
+      (ac.outputLatency || ac.baseLatency || 0) -
+      offset,
+  );
+}
 /** @param {number} rate */
 function setTempo(rate) {
   if (tempo.at(-1)?.rate === rate) return;
@@ -1070,11 +1087,11 @@ const timingLabel = (delta) =>
   Math.abs(delta) < 0.0005
     ? "ON TIME"
     : `${Math.round(Math.abs(delta) * 1000)} ms ${delta < 0 ? "EARLY" : "LATE"}`;
-/** @param {number} lane */
-function tryHit(lane) {
+/** @param {number} lane @param {number} [timeStamp] when the key or finger went down
+ * @param {number} [t] song time to judge at; autoplay passes the note's own time */
+function tryHit(lane, timeStamp, t = pressedSongTime(timeStamp) ?? now()) {
   press[lane] = rt;
-  const tr = tracks[run.currentTrack],
-    t = now();
+  const tr = tracks[run.currentTrack];
   const window = LEVELS[level].win;
   const n = findHittableNote(tr, lane, t, window, audioTime);
   if (!n) return; // shortcut: no penalty for stray presses
@@ -1174,7 +1191,7 @@ function dispatchAction(action) {
       }
       break;
     case "hit":
-      tryHit(action.lane);
+      tryHit(action.lane, action.timeStamp);
       break;
     case "move":
       move(action.delta);
@@ -1207,6 +1224,7 @@ function handleKey(e) {
       return;
     }
   }
+  if (action?.type === "hit") action.timeStamp = e.timeStamp;
   if (action) dispatchAction(action);
 }
 addEventListener("keydown", handleKey);
@@ -1232,7 +1250,7 @@ function bindTouchPad(button) {
     button.setPointerCapture(e.pointerId);
     touchPointers.set(e.pointerId, button);
     button.classList.add("pressed");
-    handleKey({ key: button.dataset.pad || "" });
+    handleKey({ key: button.dataset.pad || "", timeStamp: e.timeStamp });
   });
   const release = (/** @type {PointerEvent} */ e) => {
     touchPointers.delete(e.pointerId);
@@ -1597,7 +1615,7 @@ function autoplayStep(t) {
   if (!tr || locked(tr, t)) return;
   for (let k = tr.judged; k < tr.notes.length && tr.notes[k].t <= t; k++) {
     const n = tr.notes[k];
-    if (!n.hit && !n.missed && !auto(tr, n)) tryHit(n.lane);
+    if (!n.hit && !n.missed && !auto(tr, n)) tryHit(n.lane, undefined, n.t);
   }
 }
 function finishPerf() {

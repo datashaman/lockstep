@@ -28,12 +28,12 @@ function button(key) {
 const pads = ['j', 'k', 'l', 'ArrowLeft', 'ArrowRight', ' '].map(button);
 vm.runInContext(`
   const inputs = []; mode = 'play'; ac = { currentTime: 42 };
-  tryHit = lane => inputs.push(['hit', lane, ac.currentTime]);
+  const stamps = []; tryHit = (lane, timeStamp) => { inputs.push(['hit', lane, ac.currentTime]); stamps.push(timeStamp); };
   move = dir => inputs.push(['move', dir]);
   pauseGame = () => { mode = 'pause'; inputs.push(['pause']); };
 `, context);
 let prevented = 0;
-const down = id => ({ pointerId: id, button: 0, preventDefault() { prevented++; } });
+const down = id => ({ pointerId: id, button: 0, timeStamp: 100 * id, preventDefault() { prevented++; } });
 for (let i = 0; i < 3; i++) pads[i].events.pointerdown(down(i + 1));
 vm.runInContext("assert.deepEqual(inputs, [['hit',0,42],['hit',1,42],['hit',2,42]]); assert.equal(touchPointers.size, 3)", context);
 assert.equal(prevented, 3, 'every simultaneous pointer is accepted immediately');
@@ -46,6 +46,7 @@ vm.runInContext('assert.equal(touchPointers.size, 0)', context);
 pads[3].events.pointerdown(down(4)); pads[4].events.pointerdown(down(5));
 pads[0].events.click({ detail: 0 }); // native keyboard/assistive activation
 vm.runInContext("assert.deepEqual(inputs.slice(3), [['move',-1],['move',1],['hit',0,42]])", context);
+vm.runInContext("assert.deepEqual(stamps, [100, 200, 300, undefined], 'pads carry the pointerdown time to judgement; assistive clicks have none')", context);
 pads[5].events.pointerdown(down(6)); pads[0].events.pointerdown(down(7));
 vm.runInContext("assert.equal(mode, 'pause'); assert.equal(inputs.length, 7); clearTouchPointers(); assert.equal(touchPointers.size, 0)", context);
 for (const pad of pads) assert.equal(pad.classes.size, 0);
@@ -62,7 +63,7 @@ vm.runInContext(`
   mode = 'title'; catalog = [DEMO, ADD]; sel = 0; delArm = rt;
   pick(1); assert.equal(delArm, -9, 'changing songs disarms delete confirmation');
 `, context);
-console.log('ok: simultaneous pads, immediate audio-clock input, no duplicate clicks, pointer cancellation, track switching, pause gating, keyboard activation, native search and touch calibration');
+console.log('ok: simultaneous pads, pointerdown timestamps, immediate audio-clock input, no duplicate clicks, pointer cancellation, track switching, pause gating, keyboard activation, native search and touch calibration');
 
 vm.runInContext(`
   assert.throws(() => context2D({ getContext: () => null }), /Canvas 2D is unavailable/);
