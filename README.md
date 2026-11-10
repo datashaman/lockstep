@@ -49,7 +49,7 @@ Choose a song’s look with **T** or the theme button on its sleeve: **Neon**, *
 
 Space or Esc pauses the song. Resume with Space/Enter and a three-second count-in, restart with R, or return to song selection with Esc. Switching tabs pauses automatically.
 
-Keep the **groove meter** alive: missed notes on your active track drain it, and consecutive misses drain more. Hits restore a little groove; captures restore more. AUTO and unselected tracks neither drain nor refill it. Below 40%, the song and highway slow down; recover to bring them back to tempo. At zero the run ends, with Retry and Song selection available. Failed runs do not save a personal best.
+Keep the **groove meter** alive: missed notes on your active track drain it, and consecutive misses drain more. Hits restore a little groove; captures restore more. AUTO and unselected tracks neither drain nor refill it. Stray presses, lane presses that hit no note once the song has started, break the multiplier, drop the track's stem to cue volume and drain a little groove; presses during the count-in or on an AUTO track are free. Strays also count against the grade, which is hits ÷ (hits + misses + strays). Below 40%, the song and highway slow down; recover to bring them back to tempo. At zero the run ends, with Retry and Song selection available. Failed runs do not save a personal best.
 
 Recorded songs slow with a tape-style pitch drop. The synth demo slows its beat and note scheduling. Both use the same chart clock, while hit windows and timing feedback remain measured in real milliseconds.
 
