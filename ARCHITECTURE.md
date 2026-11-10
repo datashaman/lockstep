@@ -24,6 +24,7 @@ Lockstep is still a static site. `index.html` loads `app.js` as a native JavaScr
 | Scoring, captures, misses and track selection | `lib/gameplay.js` | `gameplay.test.mjs` |
 | Catalog selection, Audius requests and search state | `lib/song-menu.js`, `lib/audius.js` | `menu-flow.test.mjs` |
 | Canvas backdrop, highway/effects and HUD | `lib/scene-renderer.js` | render, materials and performance tests |
+| Frame timing for `?perf` | `lib/perf-stats.js` | `perf-stats.test.mjs` |
 
 ## Module rules
 
@@ -52,6 +53,8 @@ GitHub Actions runs these checks on pull requests and pushes to `main`, using No
 `lib/song.ts` defines shared data shapes. The modules in `lib/`, including the scene renderer and its shader dependencies, use JSDoc references and strict TypeScript. `tsconfig.browser.json` additionally checks every first-party browser/worker entry point that starts with `// @ts-check`; it leaves `checkJs` off so vendor code stays unchecked, and `typecheck-coverage.test.mjs` requires the pragma on every root `.js` file. Strict null and implicit-any checks are enabled for these entry points too. Explicit JSDoc types cover lifecycle state and parameters. Runtime JSON and unchecked vendor APIs still need validation where their data crosses a trust boundary; compiler checks do not establish runtime validity. Vendor implementation code is excluded from checking. `lib/worker.ts` defines the request/reply protocol on both sides, and `lib/scene.ts` defines the renderer frame. JavaScript remains the browser source, with no generated files.
 
 Run `npm run format` after changing the entry point, page, styles or library modules. Readability is intentional: expand state transitions into steps and prefer descriptive names over reducing line count.
+
+`performance.test.mjs` draws a worst-case frame in every theme and asserts ceilings on canvas calls, gradient creations and glowing (`shadowBlur`) draws. A change that raises one on purpose updates the ceiling and its measured-value comment in the same change, and says why. For real frame times, run the game with `?perf&autoplay` (see the README).
 
 New module tests should import the real module and exercise its public interface. `test/app-harness.mjs` preserves the existing Canvas integration tests during migration; it injects the real module exports into their VM. Those tests still inspect application state and should shrink as the remaining systems become independent.
 

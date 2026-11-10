@@ -70,6 +70,8 @@ Do not commit songs you don't own the rights to; `.gitignore` keeps everything b
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for module responsibilities and the migration plan. Run `npm ci` once, then `npm run typecheck`, `npm test`, and `npm run format:check`. The game still runs with the static Python server; no build step is required.
 
+Two address flags help measure performance. `?perf` times every frame of a run; when the run ends, the results screen and the console show script-time percentiles, the share of dropped frames, frames over 50 ms and, where the browser reports them (Chromium), long tasks. `?autoplay` hits every note on time and moves on from captured tracks; autoplay runs save no best. Use `?perf&autoplay` for numbers that can be compared across devices and changes.
+
 ## Test
 
 ```sh
