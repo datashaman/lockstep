@@ -31,7 +31,9 @@ export type InferenceRequest =
 export type InferenceResponse =
   | { type: "ready"; inputNames: string[]; outputNames: string[] }
   | { type: "result"; outputs: Record<string, InferenceTensor> }
-  | { type: "error" | "lost"; message: string };
+  | { type: "error" | "lost"; message: string }
+  /** Progress notes for the page's ?debug log; the session ignores them. */
+  | { type: "note"; message: string };
 /** What lib/inference-session.js needs from an inference.js worker (the page-hosted relay). */
 export interface InferenceChild {
   onmessage: ((event: { data: InferenceResponse }) => void) | null;
