@@ -31,6 +31,7 @@ const run = createRunState();
 import { actionForKey } from "./lib/input-actions.js";
 import { createStemPlayer } from "./lib/stem-player.js";
 import { createAudioEngine } from "./lib/audio-engine.js";
+import { createFrameStats } from "./lib/perf-stats.js";
 import { songPosition, audioElapsed } from "./lib/transport.js";
 import {
   extendBeatGrid,
@@ -282,6 +283,27 @@ let pops = [];
 let rings = [];
 let press = [-9, -9, -9],
   laneHit = new Array(12).fill(-9);
+// Development flags. ?perf times every play frame and reports when the run ends;
+// ?autoplay hits every note on time and saves no best.
+const flags = globalThis.location ? new URL(location.href).searchParams : null;
+const PERF = !!flags?.has("perf"),
+  AUTOPLAY = !!flags?.has("autoplay");
+/** @type {ReturnType<typeof createFrameStats> | null} */
+let frameStats = null;
+/** Long tasks during play; null where the browser cannot observe them.
+ * @type {number | null} */
+let longTasks = null;
+let perfLine = "";
+if (
+  PERF &&
+  globalThis.PerformanceObserver?.supportedEntryTypes?.includes("longtask")
+) {
+  longTasks = 0;
+  new PerformanceObserver((list) => {
+    if (mode === "play")
+      longTasks = (longTasks ?? 0) + list.getEntries().length;
+  }).observe({ type: "longtask" });
+}
 const stars = Array.from({ length: 220 }, () => ({
   x: Math.random() * 2 - 1,
   y: Math.random() * 2 - 1,
@@ -379,6 +401,11 @@ function reset(menuImage = null) {
   laneHit.fill(-9);
   inSync = false;
   syncAt = -9;
+  if (PERF) {
+    frameStats = createFrameStats();
+    perfLine = "";
+    if (longTasks !== null) longTasks = 0;
+  }
   entrance = menuImage ? { image: menuImage, at: rt } : null;
   if (menuImage && reducedMotion?.matches)
     camX = camTo = trackX(run.currentTrack);
@@ -1482,6 +1509,7 @@ function logic(t) {
     for (let b = Math.ceil(sched / BARLEN); b * BARLEN < upto && b < BARS; b++)
       if (b >= 0) audio.playPad(b, audioTime(b * BARLEN));
   }
+  if (AUTOPLAY) autoplayStep(t);
   for (const [trackIndex, tr] of tracks.entries()) {
     if (song.synth)
       for (
@@ -1531,19 +1559,72 @@ function logic(t) {
   if (t > end + 1) {
     mode = "over";
     overAt = rt;
-    saveBest();
+    if (AUTOPLAY) newBest = false;
+    else saveBest();
   }
 }
+/** ?autoplay: hit each note as it arrives, and leave a locked track for the
+ * nearest playable one, preferring the right on a tie.
+ * @param {number} t */
+function autoplayStep(t) {
+  const current = run.currentTrack;
+  if (tracks[current] && locked(tracks[current], t))
+    for (let d = 1; d < tracks.length; d++) {
+      const right = tracks[current + d],
+        left = tracks[current - d];
+      if (right && playable(right, t)) {
+        move(1);
+        break;
+      }
+      if (left && playable(left, t)) {
+        move(-1);
+        break;
+      }
+    }
+  // Hit on arrival, before this frame's judgement can count a note as missed.
+  const tr = tracks[run.currentTrack];
+  if (!tr || locked(tr, t)) return;
+  for (let k = tr.judged; k < tr.notes.length && tr.notes[k].t <= t; k++) {
+    const n = tr.notes[k];
+    if (!n.hit && !n.missed && !auto(tr, n)) tryHit(n.lane);
+  }
+}
+function finishPerf() {
+  if (!frameStats) return;
+  const s = frameStats.summary(),
+    ms = (/** @type {number} */ v) => Math.round(v * 100) / 100;
+  frameStats = null;
+  console.log(
+    JSON.stringify({
+      song: song.title,
+      level: LEVELS[level].name,
+      theme: theme.name,
+      dpr: DPR,
+      autoplay: AUTOPLAY,
+      frames: s.frames,
+      p50: ms(s.p50),
+      p95: ms(s.p95),
+      p99: ms(s.p99),
+      dropped: Math.round(s.dropped * 1e4) / 1e4,
+      longFrames: s.longFrames,
+      longTasks,
+    }),
+  );
+  perfLine = `PERF ${s.frames} frames · script p50 ${ms(s.p50)} p95 ${ms(s.p95)} p99 ${ms(s.p99)} ms · dropped ${(s.dropped * 100).toFixed(2)}% · long frames ${s.longFrames} · long tasks ${longTasks ?? "n/a"}`;
+}
 function frame() {
+  const started = performance.now();
   updateTouchControls();
-  const wall = performance.now() / 1000,
-    fdt = Math.min(0.05, wall - last);
+  const wall = started / 1000,
+    delta = wall - last,
+    fdt = Math.min(0.05, delta);
   last = wall;
   if (mode === "pause") {
     drawPause();
     requestAnimationFrame(frame);
     return;
   }
+  const recording = mode === "play";
   rt = wall - visualOffset;
   const playing = mode === "play" || mode === "over" || mode === "failed",
     t = playing ? now() : attract(); // attract mode on title
@@ -1586,6 +1667,10 @@ function frame() {
   rings = rings.filter((r) => rt - r.born < 0.7);
   shown += (run.score - shown) * Math.min(1, fdt * 12);
   draw(t, playing);
+  if (recording && frameStats) {
+    frameStats.record(performance.now() - started, delta * 1000);
+    if (mode === "over" || mode === "failed") finishPerf();
+  }
   requestAnimationFrame(frame);
 }
 /** @type {ReturnType<typeof import("./theme-shaders.js").createThemeShader>} */
@@ -2407,6 +2492,7 @@ function drawFailure() {
     `500 15px ${SANS}`,
     "#a6b6c8",
   );
+  if (perfLine) text(perfLine, W / 2, 530, `600 10px ${MONO}`, "#a6b6c8");
   zones = [];
   /** @type {[string,string,()=>void][]} */ ([
     ["SPACE / ENTER", "Retry", reset],
@@ -2496,9 +2582,11 @@ function drawResults() {
     "right",
   );
   text(
-    newBest
-      ? "NEW PERSONAL BEST"
-      : `BEST  ${record ? record.score.toLocaleString() : "—"}`,
+    AUTOPLAY
+      ? "AUTOPLAY · BEST NOT SAVED"
+      : newBest
+        ? "NEW PERSONAL BEST"
+        : `BEST  ${record ? record.score.toLocaleString() : "—"}`,
     752,
     308,
     `800 13px ${MONO}`,
@@ -2556,6 +2644,7 @@ function drawResults() {
     "#a6b6c8",
     "left",
   );
+  if (perfLine) text(perfLine, 48, 532, `600 10px ${MONO}`, "#a6b6c8", "left");
   shortcut("SPACE", "play again", 260, 558);
   shortcut("ESC", "song selection", 540, 558);
 }

@@ -5,13 +5,24 @@ import { createAudioHarness } from './test/audio-context.mjs';
 const source = appSource;
 const { AudioContext, countEdges } = createAudioHarness();
 const gradient = { addColorStop() {} };
-const g = new Proxy({}, { get: (o, k) => o[k] ?? (k === 'measureText' ? s => ({ width: s.length * 7 }) : k.startsWith('create') ? () => gradient : () => {}), set: (o, k, v) => (o[k] = v, true) });
+// A no-op canvas that counts calls, gradient creations and glowing draws (nonzero shadowBlur).
+const counts = { calls: 0, gradients: 0, blurs: 0 };
+const g = new Proxy({}, {
+  get: (o, k) => o[k] ?? (typeof k !== 'string' ? undefined : (...args) => {
+    counts.calls++;
+    if (/^create(Linear|Radial|Conic)Gradient$/.test(k)) counts.gradients++;
+    return k === 'measureText' ? { width: args[0].length * 7 } : k.startsWith('create') ? gradient : undefined;
+  }),
+  set: (o, k, v) => { if (k === 'shadowBlur' && v) counts.blurs++; o[k] = v; return true; },
+});
 const timers = new Map(); let timerId = 0;
-const context = vm.createContext({ ...appImports, assert, AudioContext, console, performance, Float32Array,
-  document: { getElementById: () => ({ getContext: () => g, addEventListener() {} }) },
+let observers = 0;
+class PerformanceObserver { static supportedEntryTypes = ['longtask']; constructor() { observers++; } observe() {} }
+const context = vm.createContext({ ...appImports, assert, AudioContext, console, performance, Float32Array, PerformanceObserver,
+  document: { getElementById: () => ({ getContext: () => g, addEventListener() {} }), createElement: () => ({ getContext: () => g }) },
   addEventListener() {}, requestAnimationFrame() {}, fetch: () => Promise.reject(new Error('offline')),
   setTimeout: fn => { timers.set(++timerId, fn); return timerId; }, clearTimeout: id => timers.delete(id),
-  countEdges,
+  countEdges, counts,
 });
 vm.runInContext(source, context);
 vm.runInContext(`
@@ -107,3 +118,96 @@ vm.runInContext(`
   reset(); assert.ok(tracks.every(tr => tr.judged === 0), 'retry resets judgement cursors');
 `, context);
 console.log('ok: binary window bounds, duplicate note times, intro/phrase equivalence and cursor reset');
+
+// Worst-case frame: a 10-minute song with a note on every sixteenth on all four tracks, a full
+// particle pool, popups, rings and capture effects. Counting calls instead of timing them keeps
+// this deterministic; the ceilings are the measured values plus 10%.
+const CEILINGS = {
+  neon: { calls: 7062, gradients: 10, blurs: 15 }, // measured 6420, 9, 13
+  liquid: { calls: 6683, gradients: 11, blurs: 15 }, // measured 6075, 10, 13
+  paper: { calls: 5156, gradients: 9, blurs: 15 }, // measured 4687, 8, 13
+  circuit: { calls: 4614, gradients: 9, blurs: 15 }, // measured 4194, 8, 13
+};
+const measured = vm.runInContext(`
+  level = 2;
+  song = { ...demoSong(), synth: false, duration: 600,
+    beats: Array.from({ length: 1201 }, (_, i) => i * .5),
+    tracks: Array.from({ length: 4 }, (_, i) => ({ name: 'TRACK ' + i, notes: Array.from({ length: 4800 }, (_, j) => [j * .125, j % 3]) })) };
+  reset(); t0 = 0;
+  const worst = {};
+  for (const key of Object.keys(THEMES)) {
+    theme = THEMES[key]; tracks.forEach((tr, i) => (tr.color = theme.colors[i])); materialTexture();
+    const most = { calls: 0, gradients: 0, blurs: 0 };
+    // Either the player is still playing one track while the others are captured, or the whole band is IN SYNC.
+    for (const sync of [false, true]) {
+      rt = 1000; mode = 'play'; cur = 1; entrance = null;
+      tracks.forEach((tr, i) => {
+        const captured = sync || i !== cur;
+        tr.capFrom = captured ? 0 : -1; tr.capTo = captured ? 9999 : -1; tr.capAt = rt - .3;
+      });
+      inSync = sync; syncAt = rt - .2;
+      parts = []; burst(0, HIT_Y, '#fff', 800, 1);
+      pops = Array.from({ length: 8 }, (_, i) => ({ text: 'PERFECT', x: i * 40, y: HIT_Y - 46, color: '#fff', size: 17, life: 9, born: rt }));
+      rings = Array.from({ length: 4 }, (_, i) => ({ x: trackX(i), born: rt - .1, color: tracks[i].color }));
+      flash = { color: '#fff', born: rt - .1 }; dash = { from: trackX(0), to: trackX(1), at: rt - .1 };
+      missAt = rt - .1; laneHit.fill(rt - .1); press.fill(rt - .05);
+      for (let i = 0; i < 60; i++) {
+        ac.currentTime = 300 + i / 60;
+        counts.calls = counts.gradients = counts.blurs = 0;
+        draw(now(), true);
+        for (const k in most) most[k] = Math.max(most[k], counts[k]);
+      }
+    }
+    worst[key] = most;
+  }
+  worst;
+`, context);
+for (const [key, most] of Object.entries(measured))
+  console.log(`worst frame, ${key}: ${most.calls} canvas calls, ${most.gradients} gradients, ${most.blurs} glowing draws`);
+for (const [key, most] of Object.entries(measured)) {
+  for (const k of Object.keys(most))
+    assert.ok(most[k] <= CEILINGS[key][k], `${key} ${k}: ${most[k]} exceeds ceiling ${CEILINGS[key][k]}`);
+}
+console.log('ok: worst-case frame stays under the canvas call, gradient and glow ceilings for every theme');
+
+// Without ?perf or ?autoplay nothing is observed or recorded, and bests save as before.
+vm.runInContext(`
+  assert.equal(PERF, false); assert.equal(AUTOPLAY, false);
+  song = demoSong(); reset(); t0 = 0; best = {};
+  assert.equal(frameStats, null);
+  tracks.forEach(tr => tr.notes.forEach(n => (n.hit = true)));
+  ac.currentTime = song.duration + LEAD_IN + 2; logic(now());
+  assert.equal(mode, 'over'); assert.ok(best['demo:2'], 'best saved');
+`, context);
+assert.equal(observers, 0, 'no long-task observer without ?perf');
+
+// ?perf&autoplay plays the demo to the results screen with no input and reports one JSON line.
+const lines = [];
+let clock = 0;
+const auto = vm.createContext({ ...appImports, assert, AudioContext, URL, PerformanceObserver, Float32Array,
+  console: { ...console, log: (...args) => lines.push(args.join(' ')) },
+  location: { href: 'https://game.example/lockstep/?perf&autoplay' },
+  performance: { now: () => clock * 1000 },
+  localStorage: {},
+  document: { getElementById: () => ({ getContext: () => g, addEventListener() {} }) },
+  addEventListener() {}, requestAnimationFrame() {}, fetch: () => Promise.reject(new Error('offline')),
+  setTimeout() {}, clearTimeout() {},
+});
+vm.runInContext(appSource, auto);
+assert.equal(observers, 1, 'long-task observer with ?perf');
+const result = vm.runInContext(`
+  initAudio(); song = demoSong(); reset();
+  let frames = 0;
+  while (mode === 'play' && frames < 10000) { frames++; ac.currentTime += 1 / 60; globalThis.tick(); frame(); }
+  ({ mode, hits: run.hits, misses: run.misses, captures: run.captures, saved: localStorage.lockstepBest, perfLine, frameStats });
+`, Object.assign(auto, { tick: () => (clock += 1 / 60) }));
+assert.equal(result.mode, 'over');
+assert.equal(result.misses, 0, 'autoplay misses nothing');
+assert.ok(result.hits > 100 && result.captures >= 4, `autoplay hits ${result.hits}, captures ${result.captures}`);
+assert.equal(result.saved, undefined, 'autoplay saves no best');
+assert.equal(result.frameStats, null, 'the run reports once');
+assert.match(result.perfLine, /^PERF \d+ frames/);
+const report = JSON.parse(lines.find((line) => line.startsWith('{')));
+assert.ok(report.frames > 3900 && report.autoplay && report.dropped === 0 && report.longTasks === 0, JSON.stringify(report));
+vm.runInContext('drawResults()', auto);
+console.log(`ok: flags off by default; autoplay finished the demo with ${result.hits} hits, ${result.captures} captures, no misses; perf reported ${report.frames} frames`);
