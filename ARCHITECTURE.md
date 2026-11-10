@@ -16,7 +16,7 @@ Lockstep is still a static site. `index.html` loads `app.js` as a native JavaScr
 | Native controls and page layout | `index.html`, `styles.css` | `touch.test.mjs` |
 | Audio suspension, resume and countdown state | `lib/pause-session.js` | `pause-session.test.mjs`, `render.test.mjs` |
 | Playback coordination and screen composition | `app.js` | renderer, touch, materials and performance tests |
-| Stem separation and worker messages | `separator.js`, `vendor/demucs-web/processor.js` | separation and audit tests |
+| Stem separation and worker messages | `separator.js`, `inference.js`, `lib/inference-session.js`, `vendor/demucs-web/processor.js` | separation, inference-session and audit tests |
 | Automatic note chart generation | `analyze.js` | `analyze.test.mjs` |
 | GPU materials | `shader-renderer.js`, `theme-shaders.js`, `liquid-shader.js` | shader and materials tests |
 
@@ -37,6 +37,7 @@ Lockstep is still a static site. `index.html` loads `app.js` as a native JavaScr
 - Input adapters translate browser events into actions before dispatch. Song-menu state preserves selection across catalog rebuilds; Audius search discards stale responses.
 - `app.js` coordinates these modules. Song storage and timing must not import the app or renderer.
 - Stored PCM is signed 16-bit stereo at 44.1 kHz, in chart-track order. Separation still runs on float audio in its worker. Do not retain both full representations on the main thread.
+- The separator worker owns the processor and stems; ONNX Runtime lives only in its child `inference.js`, which `lib/inference-session.js` replaces when the GPU is lost or a run stalls (iPad Safari resets its GPU process mid-song). Per-chunk buffers are allocated once per song and large ONNX outputs are detached after use: WebKit lets garbage pile up beside a multi-gigabyte WebAssembly heap.
 
 ## Types and checks
 

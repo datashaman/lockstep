@@ -1,10 +1,22 @@
 // @ts-check
-// Module worker: Demucs stem separation (onnxruntime-web, WebGPU with WASM fallback) + charting, off the main thread.
+// Module worker: Demucs stem separation + charting, off the main thread. The ONNX runtime
+// (WebGPU with WASM fallback) runs in a child worker, inference.js, replaced if the GPU is lost.
 // in:  { id, left, right }  stereo Float32Array @ 44.1 kHz (transferred) — separate + chart
 //  or  { id, stems }  already-separated stems — re-chart only (no model needed)
 // out: { id, type: 'progress', phase: 'model' | 'separate' | 'chart', progress }  then  { id, type: 'done', song, pcm }  or  { id, type: 'error', message }
 import { DemucsProcessor, CONSTANTS } from "./vendor/demucs-web/index.js";
 import { analyze } from "./analyze.js";
+import { createInferenceSession } from "./lib/inference-session.js";
+
+/** The processor's feed tensors; the session copies their data to the inference worker. */
+class Tensor {
+  /** @param {string} _type @param {Float32Array} data @param {number[]} dims */
+  constructor(_type, data, dims) {
+    this.data = data;
+    this.dims = dims;
+  }
+  dispose() {}
+}
 
 /** @type {import("./lib/worker").SeparatorScope} */
 const workerScope = /** @type {import("./lib/worker").SeparatorScope} */ (
@@ -60,15 +72,12 @@ workerScope.onmessage = ({ data: { id, left, right, stems: given } }) =>
           song: analyze(given, { onProgress: (p) => post("chart", p) }),
         });
       if (!proc) {
-        const ort = await import(
-          "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.all.mjs"
-        );
-        ort.env.wasm.numThreads = self.crossOriginIsolated
-          ? navigator.hardwareConcurrency
-          : 1;
-        const candidate = new DemucsProcessor({ ort });
+        const candidate = new DemucsProcessor({ ort: { Tensor } });
         post("model", 0);
-        await candidate.loadModel(await modelBytes(post));
+        candidate.session = await createInferenceSession(
+          () => modelBytes(post),
+          () => new Worker("inference.js", { type: "module" }),
+        );
         proc = candidate;
       }
       proc.onProgress = (/** @type {{progress:number}} */ p) =>
