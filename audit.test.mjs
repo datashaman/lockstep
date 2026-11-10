@@ -52,24 +52,23 @@ try {
 } finally { globalThis.document = originalDocument; }
 console.log('ok: import byte and duration limits, bounded download cancellation, metadata cleanup');
 
-let runtimeLoads = 0, modelAttempts = 0;
+let modelAttempts = 0;
 const messages = [];
 class Processor {
-  async loadModel() { if (++modelAttempts === 1) throw Error('model failed'); }
   async separate() { this.onProgress({ progress: .5 }); return { drums: { left:new Float32Array([-2, 0, .5, 2]), right:new Float32Array([1, -.5, 0, -1]) } }; }
 }
 const worker = vm.createContext({ DemucsProcessor:Processor, CONSTANTS:{ DEFAULT_MODEL_URL:'model' }, self:{}, navigator:{},
-  loadRuntime:async()=>{ runtimeLoads++; return { env:{ wasm:{} } }; }, analyze:()=>({tracks:[{stem:'drums'}]}), postMessage:m=>messages.push(m),
+  createInferenceSession:async()=>{ if (++modelAttempts === 1) throw Error('model failed'); return {}; }, analyze:()=>({tracks:[{stem:'drums'}]}), postMessage:m=>messages.push(m),
   caches:{ open:async()=>({match:async()=>({arrayBuffer:async()=>new ArrayBuffer(0)})}) } });
-const source = readFileSync('separator.js','utf8').replace(/^import .*;$/gm,'').replace(/import\(\s*['"]https:[^'"]+['"]\s*\)/, 'loadRuntime()');
+const source = readFileSync('separator.js','utf8').replace(/^import .*;$/gm,'');
 vm.runInContext(source, worker);
 await vm.runInContext("onmessage({data:{id:'chart',stems:{}}})", worker);
-assert.equal(runtimeLoads, 0, 'rechart works without loading remote runtime');
+assert.equal(modelAttempts, 0, 'rechart works without loading the model');
 for (const id of ['failed','first','second']) await vm.runInContext(`onmessage({data:{id:'${id}'}})`, worker);
 assert.equal(messages.find(m=>m.id==='failed').type, 'progress');
 assert.ok(messages.some(m=>m.id==='failed' && m.type==='error'));
 for (const id of ['first','second']) assert.ok(messages.some(m=>m.id===id && m.progress===.5));
-assert.equal(runtimeLoads, 2, 'failed model can retry, then successful model is reused');
+assert.equal(modelAttempts, 2, 'failed model can retry, then successful model is reused');
 console.log('ok: offline rechart, model retry and correctly addressed queued progress');
 
 const saved = messages.find(m=>m.id==='second' && m.type==='done');
