@@ -1,6 +1,7 @@
 // @ts-check
-// Module worker owning onnxruntime-web and the Demucs session. separator.js replaces it when the GPU
-// is lost or a run stalls: replacing the worker is the only way to get a fresh WebGPU device.
+// Module worker owning onnxruntime-web and the Demucs session. The page starts it for separator.js
+// (Safari gives nested workers no WebGPU) and replaces it when the GPU is lost or a run stalls:
+// a new worker is the only way to get a fresh WebGPU device.
 // Protocol: lib/worker.ts InferenceRequest / InferenceResponse.
 
 /** @type {import("./lib/worker").InferenceScope} */
@@ -33,7 +34,7 @@ async function handle(msg) {
       ? navigator.hardwareConcurrency
       : 1;
     const ready = await (session = ort.InferenceSession.create(msg.model, {
-      executionProviders: msg.cpu ? ["wasm"] : ["webgpu", "wasm"],
+      executionProviders: ["webgpu", "wasm"],
       graphOptimizationLevel: "basic",
     }));
     free(new Uint8Array(msg.model)); // the runtime has copied the model into its own memory

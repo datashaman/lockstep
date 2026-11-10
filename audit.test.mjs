@@ -58,7 +58,7 @@ class Processor {
   async separate() { this.onProgress({ progress: .5 }); return { drums: { left:new Float32Array([-2, 0, .5, 2]), right:new Float32Array([1, -.5, 0, -1]) } }; }
 }
 const worker = vm.createContext({ DemucsProcessor:Processor, CONSTANTS:{ DEFAULT_MODEL_URL:'model' }, self:{}, navigator:{},
-  createInferenceSession:async()=>{ if (++modelAttempts === 1) throw Error('model failed'); return {}; }, analyze:()=>({tracks:[{stem:'drums'}]}), postMessage:m=>messages.push(m),
+  createInferenceSession:async()=>{ if (++modelAttempts === 1) throw Error('model failed'); return {}; }, createRelayClient:()=>({ spawn(){}, receive:()=>false }), analyze:()=>({tracks:[{stem:'drums'}]}), postMessage:m=>messages.push(m),
   caches:{ open:async()=>({match:async()=>({arrayBuffer:async()=>new ArrayBuffer(0)})}) } });
 const source = readFileSync('separator.js','utf8').replace(/^import .*;$/gm,'');
 vm.runInContext(source, worker);

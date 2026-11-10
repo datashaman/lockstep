@@ -32,6 +32,7 @@ import { actionForKey } from "./lib/input-actions.js";
 import { createStemPlayer } from "./lib/stem-player.js";
 import { createAudioEngine } from "./lib/audio-engine.js";
 import { createFrameStats } from "./lib/perf-stats.js";
+import { createRelayHost } from "./lib/inference-relay.js";
 import { songPosition, audioElapsed } from "./lib/transport.js";
 import {
   extendBeatGrid,
@@ -431,6 +432,9 @@ let job = null;
 let jobs = [];
 /** @type {Worker | null} */
 let worker = null;
+/** Starts and relays the separator's inference.js workers (lib/inference-relay.js).
+ * @type {ReturnType<typeof createRelayHost> | null} */
+let inferenceHost = null;
 let delArm = -9,
   CHART_V = 0;
 /** @param {SongEntry} e */
@@ -486,6 +490,8 @@ function releaseWorker() {
   if (worker && !pending.size && !job && !jobs.length) {
     worker.terminate();
     worker = null;
+    inferenceHost?.close();
+    inferenceHost = null;
   }
 }
 /** @param {import("./lib/worker").WorkerRequest} msg @param {Transferable[]} [transfer] @param {(event:import("./lib/worker").WorkerProgress)=>void} [onProgress]
@@ -494,11 +500,14 @@ function work(msg, transfer = [], onProgress) {
   // run a job on the separator worker; replies are routed by id
   if (!worker) {
     worker = new Worker("separator.js", { type: "module" });
+    const host = (inferenceHost = createRelayHost(worker));
     worker.onmessage = (
-      /** @type {MessageEvent<import("./lib/worker").WorkerResponse>} */ {
-        data: d,
+      /** @type {MessageEvent<import("./lib/worker").WorkerResponse | import("./lib/worker").InferenceRelay>} */ {
+        data,
       },
     ) => {
+      if (host.receive(data)) return;
+      const d = /** @type {import("./lib/worker").WorkerResponse} */ (data);
       const p = pending.get(d.id);
       if (!p) return;
       if (d.type === "progress") return p.onProgress?.(d);
@@ -511,6 +520,8 @@ function work(msg, transfer = [], onProgress) {
       pending.clear();
       worker?.terminate();
       worker = null;
+      host.close();
+      inferenceHost = null;
     };
   }
   const activeWorker = worker;
