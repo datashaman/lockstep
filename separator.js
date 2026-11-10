@@ -1,12 +1,14 @@
 // @ts-check
 // Module worker: Demucs stem separation + charting, off the main thread. The ONNX runtime
-// (WebGPU with WASM fallback) runs in a child worker, inference.js, replaced if the GPU is lost.
+// (WebGPU with WASM fallback) runs in inference.js workers that the page starts and relays to,
+// replaced if the GPU is lost (lib/inference-session.js, lib/inference-relay.js).
 // in:  { id, left, right }  stereo Float32Array @ 44.1 kHz (transferred) — separate + chart
 //  or  { id, stems }  already-separated stems — re-chart only (no model needed)
 // out: { id, type: 'progress', phase: 'model' | 'separate' | 'chart', progress }  then  { id, type: 'done', song, pcm }  or  { id, type: 'error', message }
 import { DemucsProcessor, CONSTANTS } from "./vendor/demucs-web/index.js";
 import { analyze } from "./analyze.js";
 import { createInferenceSession } from "./lib/inference-session.js";
+import { createRelayClient } from "./lib/inference-relay.js";
 
 /** The processor's feed tensors; the session copies their data to the inference worker. */
 class Tensor {
@@ -59,8 +61,12 @@ const f2i = (a) => {
 /** @type {DemucsProcessor | undefined} */
 let proc;
 let queue = Promise.resolve();
-workerScope.onmessage = ({ data: { id, left, right, stems: given } }) =>
-  (queue = queue.then(async () => {
+const inference = createRelayClient(workerScope);
+workerScope.onmessage = ({ data }) => {
+  if (inference.receive(data) || !("id" in data)) return;
+  const { id, stems: given } = data;
+  let { left, right } = data;
+  return (queue = queue.then(async () => {
     /** @param {"model"|"separate"|"chart"} phase @param {number} progress */
     const post = (phase, progress) =>
       workerScope.postMessage({ id, type: "progress", phase, progress });
@@ -76,7 +82,7 @@ workerScope.onmessage = ({ data: { id, left, right, stems: given } }) =>
         post("model", 0);
         candidate.session = await createInferenceSession(
           () => modelBytes(post),
-          () => new Worker("inference.js", { type: "module" }),
+          inference.spawn,
         );
         proc = candidate;
       }
@@ -112,3 +118,4 @@ workerScope.onmessage = ({ data: { id, left, right, stems: given } }) =>
       });
     }
   }));
+};
