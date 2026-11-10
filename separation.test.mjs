@@ -46,3 +46,28 @@ for (const stem of Object.values(combined)) {
 }
 assert.equal(live.size, 0, 'time/frequency outputs released after reconstruction');
 console.log(`ok: 2:28 chunk processing, inference/validation failures, spectral reconstruction and explicit tensor cleanup (${chunks} chunks)`);
+
+// Spectral reconstruction against values from upstream's implementation, and a fixed set of large
+// buffers however many chunks a song has: per-chunk garbage grew WebKit's heap until iOS killed the tab.
+const { TRAINING_SAMPLES: T, MODEL_SPEC_BINS: B, MODEL_SPEC_FRAMES: F, SAMPLE_RATE } = CONSTANTS;
+const Float32 = Float32Array;
+let large = 0;
+globalThis.Float32Array = class extends Float32 {
+  constructor(...args) { super(...args); if (!(args[0] instanceof ArrayBuffer) && this.length >= 1e5) large++; }
+};
+processor.onProgress = () => {};
+processor.session.run = async feeds => {
+  const spectrum = new Float32(4 * 4 * B * F).map((_, i) => Math.sin(i * .37) * .01 + feeds.spectrum.data[i % (4 * B * F)]);
+  const audio = new Float32(4 * 2 * T).map((_, i) => feeds.waveform.data[i % (2 * T)] * .5);
+  return { audio: new Tensor('float32', audio, [1, 4, 2, T]), spectrum: new Tensor('float32', spectrum, [1, 4, 4, B, F]) };
+};
+const song = seconds => [new Float32(seconds * SAMPLE_RATE).map((_, i) => Math.sin(i / 25) * .5), new Float32(seconds * SAMPLE_RATE).map((_, i) => Math.cos(i / 41) * .3)];
+const golden = await processor.separate(...song(10));
+const goldenAllocations = large;
+assert.deepEqual([golden.drums.left[1000], golden.bass.right[200000], golden.other.left[300000], golden.vocals.right[10 * SAMPLE_RATE - 5]],
+  [0.5524398684501648, -0.29859459400177, -0.5801543593406677, 0.3013315796852112], 'spectral reconstruction matches upstream');
+large = 0;
+await processor.separate(...song(40));
+globalThis.Float32Array = Float32;
+assert.equal(large, goldenAllocations, 'a 7-chunk song allocates no more large buffers than a 2-chunk song');
+console.log(`ok: spectral reconstruction matches upstream; ${large} large buffers per song regardless of chunk count`);

@@ -1,137 +1,111 @@
 /**
  * Demucs audio processor - Core separation logic
+ *
+ * Lockstep change: every per-segment buffer is allocated once per separate() call and reused.
+ * Upstream allocated ~145 MB of short-lived arrays per 7.8 s segment. WebKit collects large
+ * garbage only once it has grown in proportion to the heap, and next to ONNX Runtime's
+ * multi-gigabyte WebAssembly heap that let memory climb ~200 MB per segment until iOS killed
+ * the tab. The arithmetic follows upstream's prepareModelInput, standaloneMask and
+ * standaloneIspec step for step, in float32, so the separated audio is unchanged.
  */
 
 import { CONSTANTS } from './constants.js';
-import { stft, istft, reflectPad } from './fft.js';
+import { fft, ifft, getHannWindow } from './fft.js';
 
-const { SAMPLE_RATE, FFT_SIZE, HOP_SIZE, TRAINING_SAMPLES, MODEL_SPEC_BINS, MODEL_SPEC_FRAMES, SEGMENT_OVERLAP, TRACKS } = CONSTANTS;
+const { FFT_SIZE, HOP_SIZE, TRAINING_SAMPLES, MODEL_SPEC_BINS, MODEL_SPEC_FRAMES, SEGMENT_OVERLAP, TRACKS } = CONSTANTS;
 
-/**
- * Convert model frequency output to complex spectrogram per track
- */
-export function standaloneMask(freqOutput) {
-  const numTracks = 4;
-  const numChannels = 4;
-  const numBins = MODEL_SPEC_BINS;
-  const numFrames = MODEL_SPEC_FRAMES;
-  const result = [];
+// Segment geometry shared by the model input and the spectral reconstruction.
+const STFT_PAD = Math.floor(HOP_SIZE / 2) * 3;
+const STFT_PAD_RIGHT = STFT_PAD + Math.ceil(TRAINING_SAMPLES / HOP_SIZE) * HOP_SIZE - TRAINING_SAMPLES;
+const CENTER_PAD = FFT_SIZE / 2;
+const FRAME_OFFSET = 2; // the model's spectrogram starts at the third STFT frame
+const PADDED_FRAMES = MODEL_SPEC_FRAMES + 2 * FRAME_OFFSET;
+const SPEC_BINS = FFT_SIZE / 2 + 1;
+const ISTFT_LENGTH = (PADDED_FRAMES - 1) * HOP_SIZE + FFT_SIZE;
+const OUTPUT_OFFSET = CENTER_PAD + STFT_PAD;
+const PLANE = MODEL_SPEC_BINS * MODEL_SPEC_FRAMES;
 
-  for (let t = 0; t < numTracks; t++) {
-    const trackSpec = {
-      leftReal: new Float32Array(numBins * numFrames),
-      leftImag: new Float32Array(numBins * numFrames),
-      rightReal: new Float32Array(numBins * numFrames),
-      rightImag: new Float32Array(numBins * numFrames)
-    };
-
-    for (let f = 0; f < numFrames; f++) {
-      for (let b = 0; b < numBins; b++) {
-        const baseIdx = t * numChannels * numBins * numFrames;
-        const outIdx = b * numFrames + f;
-        trackSpec.leftReal[outIdx] = freqOutput[baseIdx + 0 * numBins * numFrames + b * numFrames + f];
-        trackSpec.leftImag[outIdx] = freqOutput[baseIdx + 1 * numBins * numFrames + b * numFrames + f];
-        trackSpec.rightReal[outIdx] = freqOutput[baseIdx + 2 * numBins * numFrames + b * numFrames + f];
-        trackSpec.rightImag[outIdx] = freqOutput[baseIdx + 3 * numBins * numFrames + b * numFrames + f];
-      }
-    }
-    result.push(trackSpec);
-  }
-
-  return result;
+/** reflectPad from fft.js, writing into a preallocated array. */
+function reflectPadInto(signal, padLeft, padRight, out) {
+  const length = signal.length;
+  for (let i = 0; i < padLeft; i++) out[i] = signal[Math.min(padLeft - i, length - 1)];
+  out.set(signal, padLeft);
+  for (let i = 0; i < padRight; i++) out[padLeft + length + i] = signal[Math.max(0, length - 2 - i)];
+  return out;
 }
 
-/**
- * Convert complex spectrogram back to time domain (iSTFT with proper offsets)
- */
-export function standaloneIspec(trackSpec, targetLength) {
-  const numBins = MODEL_SPEC_BINS;
-  const numFrames = MODEL_SPEC_FRAMES;
-  const hopLength = HOP_SIZE;
-  const paddedBins = numBins + 1;
-  const paddedFrames = numFrames + 4;
-
-  const padChannel = (real, imag) => {
-    const paddedReal = new Float32Array(paddedFrames * paddedBins);
-    const paddedImag = new Float32Array(paddedFrames * paddedBins);
-
-    for (let f = 0; f < numFrames; f++) {
-      for (let b = 0; b < numBins; b++) {
-        const srcIdx = b * numFrames + f;
-        const dstFrame = f + 2;
-        const dstIdx = dstFrame * paddedBins + b;
-        paddedReal[dstIdx] = real[srcIdx];
-        paddedImag[dstIdx] = imag[srcIdx];
-      }
-    }
-    return { real: paddedReal, imag: paddedImag };
+/** Every buffer one segment needs, plus the iSTFT window sum, which is the same for every segment. */
+function createWorkspace() {
+  const window = getHannWindow(FFT_SIZE);
+  const windowSum = new Float32Array(ISTFT_LENGTH);
+  for (let frame = 0; frame < PADDED_FRAMES; frame++) {
+    const start = frame * HOP_SIZE;
+    for (let i = 0; i < FFT_SIZE && start + i < ISTFT_LENGTH; i++) windowSum[start + i] += window[i] * window[i];
+  }
+  const stftLength = TRAINING_SAMPLES + STFT_PAD + STFT_PAD_RIGHT;
+  return {
+    window,
+    windowSum,
+    segment: [new Float32Array(TRAINING_SAMPLES), new Float32Array(TRAINING_SAMPLES)],
+    stftInput: new Float32Array(stftLength),
+    centered: new Float32Array(stftLength + 2 * CENTER_PAD),
+    waveform: new Float32Array(2 * TRAINING_SAMPLES),
+    magSpec: new Float32Array(4 * PLANE),
+    windowed: new Float32Array(FFT_SIZE),
+    re: new Float32Array(FFT_SIZE),
+    im: new Float32Array(FFT_SIZE),
+    fullRe: new Float32Array(FFT_SIZE),
+    fullIm: new Float32Array(FFT_SIZE),
+    istft: new Float32Array(ISTFT_LENGTH),
+    overlap: new Float32Array(TRAINING_SAMPLES),
   };
-
-  const leftPadded = padChannel(trackSpec.leftReal, trackSpec.leftImag);
-  const rightPadded = padChannel(trackSpec.rightReal, trackSpec.rightImag);
-
-  const centerPad = FFT_SIZE / 2;
-  const pad = Math.floor(hopLength / 2) * 3;
-  const istftLength = (paddedFrames - 1) * hopLength + FFT_SIZE;
-
-  const leftOut = istft(leftPadded.real, leftPadded.imag, paddedFrames, paddedBins, FFT_SIZE, hopLength, istftLength);
-  const rightOut = istft(rightPadded.real, rightPadded.imag, paddedFrames, paddedBins, FFT_SIZE, hopLength, istftLength);
-
-  const totalOffset = centerPad + pad;
-  const left = leftOut.subarray(totalOffset, totalOffset + targetLength);
-  const right = rightOut.subarray(totalOffset, totalOffset + targetLength);
-
-  return { left: new Float32Array(left), right: new Float32Array(right) };
 }
 
-/**
- * Prepare model input from stereo audio
- */
-export function prepareModelInput(leftChannel, rightChannel) {
-  const inputLength = TRAINING_SAMPLES;
-
-  const paddedLeft = new Float32Array(inputLength);
-  const paddedRight = new Float32Array(inputLength);
-  const copyLen = Math.min(leftChannel.length, inputLength);
-  paddedLeft.set(leftChannel.subarray(0, copyLen));
-  paddedRight.set(rightChannel.subarray(0, copyLen));
-
-  const le = Math.ceil(inputLength / HOP_SIZE);
-  const pad = Math.floor(HOP_SIZE / 2) * 3;
-  const padRight = pad + le * HOP_SIZE - inputLength;
-
-  const stftInputLeft = reflectPad(paddedLeft, pad, padRight);
-  const stftInputRight = reflectPad(paddedRight, pad, padRight);
-
-  const centerPad = FFT_SIZE / 2;
-  const centeredLeft = reflectPad(stftInputLeft, centerPad, centerPad);
-  const centeredRight = reflectPad(stftInputRight, centerPad, centerPad);
-
-  const stftLeft = stft(centeredLeft, FFT_SIZE, HOP_SIZE);
-  const stftRight = stft(centeredRight, FFT_SIZE, HOP_SIZE);
-
-  const numBins = MODEL_SPEC_BINS;
-  const numFrames = MODEL_SPEC_FRAMES;
-  const frameOffset = 2;
-
-  const magSpec = new Float32Array(4 * numBins * numFrames);
-
-  for (let f = 0; f < numFrames; f++) {
-    const srcFrame = f + frameOffset;
-    for (let b = 0; b < numBins; b++) {
-      const srcIdx = srcFrame * stftLeft.numBins + b;
-      magSpec[0 * numBins * numFrames + b * numFrames + f] = stftLeft.real[srcIdx];
-      magSpec[1 * numBins * numFrames + b * numFrames + f] = stftLeft.imag[srcIdx];
-      magSpec[2 * numBins * numFrames + b * numFrames + f] = stftRight.real[srcIdx];
-      magSpec[3 * numBins * numFrames + b * numFrames + f] = stftRight.imag[srcIdx];
+/** Model inputs for the segment in ws.segment: the stereo waveform and the
+ * [leftReal, leftImag, rightReal, rightImag] spectrogram (upstream prepareModelInput). */
+function fillModelInput(ws) {
+  const scale = 1.0 / Math.sqrt(FFT_SIZE);
+  ws.waveform.set(ws.segment[0], 0);
+  ws.waveform.set(ws.segment[1], TRAINING_SAMPLES);
+  for (let channel = 0; channel < 2; channel++) {
+    reflectPadInto(ws.segment[channel], STFT_PAD, STFT_PAD_RIGHT, ws.stftInput);
+    reflectPadInto(ws.stftInput, CENTER_PAD, CENTER_PAD, ws.centered);
+    const realBase = 2 * channel * PLANE;
+    const imagBase = realBase + PLANE;
+    for (let f = 0; f < MODEL_SPEC_FRAMES; f++) {
+      const start = (f + FRAME_OFFSET) * HOP_SIZE;
+      for (let i = 0; i < FFT_SIZE; i++) ws.windowed[i] = ws.centered[start + i] * ws.window[i];
+      fft(ws.re, ws.im, ws.windowed, FFT_SIZE);
+      for (let b = 0; b < MODEL_SPEC_BINS; b++) {
+        ws.magSpec[realBase + b * MODEL_SPEC_FRAMES + f] = ws.re[b] * scale;
+        ws.magSpec[imagBase + b * MODEL_SPEC_FRAMES + f] = ws.im[b] * scale;
+      }
     }
   }
+}
 
-  const waveform = new Float32Array(2 * inputLength);
-  waveform.set(paddedLeft, 0);
-  waveform.set(paddedRight, inputLength);
-
-  return { waveform, magSpec, numBins, numFrames, originalLength: leftChannel.length };
+/** Inverse STFT of one track channel of the model's spectral output into ws.istft, before
+ * window-sum normalisation (upstream standaloneMask + standaloneIspec). The padding frames
+ * are silent, so only the model's frames are transformed. */
+function istftInto(ws, freqData, realBase, imagBase) {
+  const scale = Math.sqrt(FFT_SIZE);
+  const out = ws.istft;
+  out.fill(0);
+  for (let f = 0; f < MODEL_SPEC_FRAMES; f++) {
+    ws.fullRe.fill(0);
+    ws.fullIm.fill(0);
+    for (let b = 0; b < MODEL_SPEC_BINS; b++) {
+      ws.fullRe[b] = freqData[realBase + b * MODEL_SPEC_FRAMES + f];
+      ws.fullIm[b] = freqData[imagBase + b * MODEL_SPEC_FRAMES + f];
+    }
+    for (let k = 1; k < SPEC_BINS - 1; k++) {
+      ws.fullRe[FFT_SIZE - k] = ws.fullRe[k];
+      ws.fullIm[FFT_SIZE - k] = -ws.fullIm[k];
+    }
+    ifft(ws.re, ws.im, ws.fullRe, ws.fullIm, FFT_SIZE);
+    const start = (f + FRAME_OFFSET) * HOP_SIZE;
+    for (let i = 0; i < FFT_SIZE; i++) out[start + i] += ws.re[i] * ws.window[i] * scale;
+  }
 }
 
 /**
@@ -219,6 +193,8 @@ export class DemucsProcessor {
       right: new Float32Array(totalSamples)
     }));
     const weights = new Float32Array(totalSamples);
+    const ws = createWorkspace();
+    const [segLeft, segRight] = ws.segment;
 
     let segmentIdx = 0;
 
@@ -226,20 +202,16 @@ export class DemucsProcessor {
       const end = Math.min(start + TRAINING_SAMPLES, totalSamples);
       const segmentLength = end - start;
 
-      const segLeft = new Float32Array(TRAINING_SAMPLES);
-      const segRight = new Float32Array(TRAINING_SAMPLES);
-
-      for (let i = 0; i < segmentLength; i++) {
-        segLeft[i] = leftChannel[start + i];
-        segRight[i] = rightChannel[start + i];
-      }
-
-      const input = prepareModelInput(segLeft, segRight);
+      segLeft.set(leftChannel.subarray(start, end));
+      segLeft.fill(0, segmentLength);
+      segRight.set(rightChannel.subarray(start, end));
+      segRight.fill(0, segmentLength);
+      fillModelInput(ws);
 
       let waveformTensor, magSpecTensor, inferResults;
       try {
-        waveformTensor = new this.ort.Tensor('float32', input.waveform, [1, 2, TRAINING_SAMPLES]);
-        magSpecTensor = new this.ort.Tensor('float32', input.magSpec, [1, 4, MODEL_SPEC_BINS, MODEL_SPEC_FRAMES]);
+        waveformTensor = new this.ort.Tensor('float32', ws.waveform, [1, 2, TRAINING_SAMPLES]);
+        magSpecTensor = new this.ort.Tensor('float32', ws.magSpec, [1, 4, MODEL_SPEC_BINS, MODEL_SPEC_FRAMES]);
 
         const feeds = {};
         feeds[this.session.inputNames[0]] = waveformTensor;
@@ -266,32 +238,11 @@ export class DemucsProcessor {
           throw new Error('Could not find time-domain output tensor');
         }
 
-        let combinedOutputs = null;
-        if (freqData) {
-          const trackSpecs = standaloneMask(freqData);
-          combinedOutputs = [];
-
-          for (let t = 0; t < 4; t++) {
-            const freqOutput = standaloneIspec(trackSpecs[t], TRAINING_SAMPLES);
-            const numChannels = timeShape[2];
-            const samples = timeShape[3];
-            const combined = {
-              left: new Float32Array(samples),
-              right: new Float32Array(samples)
-            };
-            for (let i = 0; i < samples; i++) {
-              combined.left[i] = timeData[t * numChannels * samples + i] + (freqOutput.left[i] || 0);
-              combined.right[i] = timeData[t * numChannels * samples + samples + i] + (freqOutput.right[i] || 0);
-            }
-            combinedOutputs.push(combined);
-          }
-        }
-
         const numTracks = timeShape[1];
         const numChannels = timeShape[2];
         const samples = timeShape[3];
 
-        const overlapWindow = new Float32Array(segmentLength);
+        const overlapWindow = ws.overlap;
         for (let i = 0; i < segmentLength; i++) {
           const fadeIn = Math.min(i / (stride * 0.5), 1);
           const fadeOut = Math.min((segmentLength - i) / (stride * 0.5), 1);
@@ -299,19 +250,21 @@ export class DemucsProcessor {
         }
 
         for (let t = 0; t < numTracks; t++) {
-          for (let i = 0; i < segmentLength && start + i < totalSamples; i++) {
-            let leftVal, rightVal;
-            if (combinedOutputs) {
-              leftVal = combinedOutputs[t].left[i];
-              rightVal = combinedOutputs[t].right[i];
-            } else {
-              const leftIdx = t * numChannels * samples + 0 * samples + i;
-              const rightIdx = t * numChannels * samples + 1 * samples + i;
-              leftVal = timeData[leftIdx];
-              rightVal = timeData[rightIdx];
+          for (let channel = 0; channel < 2; channel++) {
+            const output = channel ? outputs[t].right : outputs[t].left;
+            const timeBase = t * numChannels * samples + channel * samples;
+            if (freqData) istftInto(ws, freqData, (4 * t + 2 * channel) * PLANE, (4 * t + 2 * channel + 1) * PLANE);
+            for (let i = 0; i < segmentLength && start + i < totalSamples; i++) {
+              let value = timeData[timeBase + i];
+              if (freqData) {
+                // Upstream stored each step in a Float32Array; fround keeps the same rounding.
+                const j = OUTPUT_OFFSET + i;
+                let spectral = ws.istft[j];
+                if (ws.windowSum[j] > 1e-8) spectral = Math.fround(spectral / ws.windowSum[j]);
+                value = Math.fround(value + (spectral || 0));
+              }
+              output[start + i] += value * overlapWindow[i];
             }
-            outputs[t].left[start + i] += leftVal * overlapWindow[i];
-            outputs[t].right[start + i] += rightVal * overlapWindow[i];
           }
         }
 
@@ -320,6 +273,13 @@ export class DemucsProcessor {
         }
       } finally {
         // Inference resources must not accumulate across song chunks, including failed runs.
+        // ONNX Runtime copies each run's ~55 MB of outputs into fresh arrays; detaching their
+        // buffers frees them now instead of whenever WebKit's heap-sized GC budget runs out.
+        // (ArrayBuffer.prototype.transfer: Safari 17.4+; older engines leave them to the GC.)
+        for (const tensor of Object.values(inferResults || {})) {
+          const data = tensor.data;
+          if (data?.buffer?.byteLength === data.byteLength) data.buffer.transfer?.(0);
+        }
         for (const tensor of new Set([waveformTensor, magSpecTensor, ...Object.values(inferResults || {})])) tensor?.dispose();
       }
 
