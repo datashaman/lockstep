@@ -5,6 +5,9 @@ import {
   recordHit,
   recordCapture,
   recordMiss,
+  recordStray,
+  accuracy,
+  STRAY_GROOVE,
   applyGroove,
   findHittableNote,
   nextTrack,
@@ -54,6 +57,7 @@ assert.deepEqual(createRunState(), {
   multiplier: 1,
   hits: 0,
   misses: 0,
+  strays: 0,
   captures: 0,
   groove: 100,
   missStreak: 0,
@@ -62,3 +66,20 @@ assert.deepEqual(createRunState(), {
 console.log(
   "ok: independent run state, capture score, miss failure, hit exclusion and silent-track switching",
 );
+
+{
+  const stray = createRunState();
+  const lane = { live: true };
+  stray.multiplier = 4;
+  stray.missStreak = 2;
+  stray.misses = 1;
+  stray.hits = 6;
+  assert.equal(recordStray(stray, lane), STRAY_GROOVE);
+  assert.equal(STRAY_GROOVE, -2);
+  assert.equal(stray.multiplier, 1, "a stray breaks the multiplier");
+  assert.equal(stray.strays, 1);
+  assert.equal(lane.live, false, "the stem drops to cue volume");
+  assert.deepEqual([stray.missStreak, stray.misses], [2, 1], "miss streak and misses untouched");
+  assert.equal(accuracy(stray), 6 / 8, "strays count against accuracy");
+  console.log("ok: strays reset the multiplier, cost groove and count against accuracy");
+}
