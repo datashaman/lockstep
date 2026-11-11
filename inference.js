@@ -24,19 +24,30 @@ function free(array) {
   buffer.transfer?.(0);
 }
 
+/** @param {string} message for the page's ?debug log */
+const note = (message) => scope.postMessage({ type: "note", message });
+
 /** @param {import("./lib/worker").InferenceRequest} msg */
 async function handle(msg) {
   if (msg.type === "load") {
+    note(
+      `load ${Math.round(msg.model.byteLength / 1e6)} MB model · navigator.gpu ${"gpu" in navigator}`,
+    );
     ort = await import(
       "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.all.mjs"
     );
     ort.env.wasm.numThreads = self.crossOriginIsolated
       ? navigator.hardwareConcurrency
       : 1;
+    note("runtime imported; creating session");
+    const created = Date.now();
     const ready = await (session = ort.InferenceSession.create(msg.model, {
       executionProviders: ["webgpu", "wasm"],
       graphOptimizationLevel: "basic",
     }));
+    note(
+      `session created in ${((Date.now() - created) / 1000).toFixed(1)} s on ${ort.env.webgpu.device ? "WebGPU" : "WebAssembly (CPU)"}`,
+    );
     free(new Uint8Array(msg.model)); // the runtime has copied the model into its own memory
     // On iPad a GPU process reset leaves session.run pending forever; this is the only signal.
     ort.env.webgpu.device?.lost.then((info) =>
@@ -58,8 +69,10 @@ async function handle(msg) {
   for (const [name, { data, dims }] of Object.entries(msg.feeds))
     feeds[name] = new Tensor("float32", data, dims);
   let results;
+  const started = Date.now();
   try {
     results = await (await session).run(feeds);
+    note(`run ${((Date.now() - started) / 1000).toFixed(1)} s`);
   } finally {
     // The feeds were copied into this worker; free them now rather than at the next full GC.
     for (const { data } of Object.values(msg.feeds)) free(data);

@@ -285,10 +285,41 @@ let rings = [];
 let press = [-9, -9, -9],
   laneHit = new Array(12).fill(-9);
 // Development flags. ?perf times every play frame and reports when the run ends;
-// ?autoplay hits every note on time and saves no best.
+// ?autoplay hits every note on time and saves no best. ?debug logs each import's
+// separation steps on screen and keeps the log in localStorage, so the log of an
+// import that crashed the tab is still there after the reload.
 const flags = globalThis.location ? new URL(location.href).searchParams : null;
 const PERF = !!flags?.has("perf"),
-  AUTOPLAY = !!flags?.has("autoplay");
+  AUTOPLAY = !!flags?.has("autoplay"),
+  debugLog = flags?.has("debug") ? createDebugLog() : null;
+function createDebugLog() {
+  const KEY = "lockstep-debug";
+  /** @type {string[]} */
+  let lines = [];
+  try {
+    lines = JSON.parse(localStorage.getItem(KEY) || "[]");
+  } catch {}
+  const pre = document.createElement("pre");
+  pre.style.cssText =
+    "position:fixed;left:0;top:0;max-width:100vw;margin:0;padding:6px;font:11px/1.3 ui-monospace,monospace;color:#7f7;background:rgba(0,0,0,.82);white-space:pre-wrap;pointer-events:none;z-index:9";
+  document.body.append(pre);
+  /** @param {string} line */
+  const log = (line) => {
+    lines = [
+      ...lines,
+      `${new Date().toISOString().slice(11, 23)} ${line}`,
+    ].slice(-400);
+    try {
+      localStorage.setItem(KEY, JSON.stringify(lines));
+    } catch {}
+    console.log("[lockstep debug]", line);
+    pre.textContent = lines.slice(-45).join("\n");
+  };
+  log(
+    `page load · ${navigator.userAgent} · navigator.gpu ${"gpu" in navigator} · isolated ${globalThis.crossOriginIsolated}`,
+  );
+  return log;
+}
 /** @type {ReturnType<typeof createFrameStats> | null} */
 let frameStats = null;
 /** Long tasks during play; null where the browser cannot observe them.
@@ -500,7 +531,14 @@ function work(msg, transfer = [], onProgress) {
   // run a job on the separator worker; replies are routed by id
   if (!worker) {
     worker = new Worker("separator.js", { type: "module" });
-    const host = (inferenceHost = createRelayHost(worker));
+    debugLog?.("separator worker started");
+    const host = (inferenceHost = createRelayHost(
+      worker,
+      undefined,
+      debugLog
+        ? (child, event) => debugLog(`inference ${child}: ${event}`)
+        : undefined,
+    ));
     worker.onmessage = (
       /** @type {MessageEvent<import("./lib/worker").WorkerResponse | import("./lib/worker").InferenceRelay>} */ {
         data,
@@ -508,6 +546,14 @@ function work(msg, transfer = [], onProgress) {
     ) => {
       if (host.receive(data)) return;
       const d = /** @type {import("./lib/worker").WorkerResponse} */ (data);
+      if (debugLog && (d.type !== "progress" || d.phase !== "model"))
+        debugLog(
+          d.type === "progress"
+            ? `${d.phase} ${Math.round(d.progress * 100)}%`
+            : d.type === "error"
+              ? `separator error: ${d.message}`
+              : "separator done",
+        );
       const p = pending.get(d.id);
       if (!p) return;
       if (d.type === "progress") return p.onProgress?.(d);
@@ -515,6 +561,7 @@ function work(msg, transfer = [], onProgress) {
       d.type === "done" ? p.ok(d) : p.no(new Error(d.message));
     };
     worker.onerror = (e) => {
+      debugLog?.(`separator worker error: ${e.message || "(no message)"}`);
       for (const p of pending.values())
         p.no(new Error(e.message || "separator failed to start"));
       pending.clear();
@@ -741,6 +788,7 @@ async function nextJob() {
     return;
   } // j: { title, bytes: () => Promise<ArrayBuffer>, url? (where it came from) }
   job = { title: j.title, phase: j.url ? "download" : "decode", progress: 0 };
+  debugLog?.(`— import ${j.title} —`);
   try {
     /** @type {ArrayBuffer | null} */
     let bytes = await j.bytes();
