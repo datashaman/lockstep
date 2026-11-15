@@ -35,6 +35,9 @@ import {
   startHold,
   endHold,
   accuracy,
+  grade,
+  mergeBest,
+  sanitizeBest,
   nextTrack,
   createTracks,
 } from "./lib/gameplay.js";
@@ -525,40 +528,30 @@ let delArm = -9,
 /** @param {SongEntry} e */
 const songKey = (e) => e.lib || e.slug || "demo";
 // Best score per song and difficulty: a per-player convenience, so localStorage (losing it costs nothing but bragging rights).
-/** @type {Record<string,{score:number,grade:string}>} */
+/** @type {Record<string,import('./lib/gameplay.js').BestRecord>} */
 let best = {};
 /** A friend's score to beat, from a share link; `same` is whether our chart matches theirs.
  * @type {(import("./lib/audius.js").Challenge & {same?: boolean}) | null} */
 let challenge = null;
 let playKey = "demo",
   newBest = false;
-try {
-  best = JSON.parse(globalThis.localStorage?.lockstepBest || "{}");
-} catch {}
-/** @param {number} acc */
-const grade = (acc) =>
-  acc >= 0.95
-    ? "S"
-    : acc >= 0.85
-      ? "A"
-      : acc >= 0.7
-        ? "B"
-        : acc >= 0.5
-          ? "C"
-          : "D";
+/** @param {string | undefined} text */
+function loadBest(text) {
+  try {
+    return sanitizeBest(JSON.parse(text || "{}"));
+  } catch {
+    return {};
+  }
+}
+best = loadBest(globalThis.localStorage?.lockstepBest);
 function saveBest() {
   const k = `${playKey}:${level}`,
-    b = best[k];
-  newBest = !b || run.score > b.score;
-  if (newBest) {
-    best[k] = {
-      score: run.score,
-      grade: grade(accuracy(run)),
-    };
-    try {
-      localStorage.lockstepBest = JSON.stringify(best);
-    } catch {}
-  }
+    previous = best[k];
+  newBest = !previous || run.score > previous.score;
+  best[k] = mergeBest(previous, run, tracks);
+  try {
+    localStorage.lockstepBest = JSON.stringify(best);
+  } catch {}
 }
 // Refresh cached copies of the worker's modules first (an older server let browsers keep stale ones), then read the chart version.
 Promise.all(
@@ -2208,9 +2201,10 @@ function drawList() {
         ax = L + 14 + tw(nm, f) + 8;
       if (on) selectedTitle(a.name, L + 14, y + 21, 250, f, "#fff", e);
       else text(nm, L + 14, y + 21, f, "rgba(255,255,255,.62)", "left");
-      if (a.artist && R - 54 - ax > 30)
+      const rec = best[`${songKey(e)}:${level}`];
+      if (a.artist && R - 78 - ax > 30)
         text(
-          fit(a.artist, R - 54 - ax, mf),
+          fit(a.artist, R - 78 - ax, mf),
           ax,
           y + 21,
           mf,
@@ -2218,7 +2212,28 @@ function drawList() {
           "left",
         );
       if (a.dur)
-        text(mmss(a.dur), R - 10, y + 21, mf, "rgba(255,255,255,.4)", "right");
+        text(mmss(a.dur), R - 34, y + 21, mf, "rgba(255,255,255,.4)", "right");
+      if (rec) {
+        // best grade at this level, and a diamond once a run was clean
+        text(
+          rec.grade,
+          R - 10,
+          y + 21,
+          `800 13px ${MONO}`,
+          `hsl(${hue},90%,75%)`,
+          "right",
+        );
+        if (rec.clean) {
+          g.fillStyle = "#3ddc97";
+          g.beginPath();
+          g.moveTo(R - 27, y + 14);
+          g.lineTo(R - 23, y + 18);
+          g.lineTo(R - 27, y + 22);
+          g.lineTo(R - 31, y + 18);
+          g.closePath();
+          g.fill();
+        }
+      }
       const i = menu.entries.indexOf(e);
       zone(
         L,
@@ -2507,26 +2522,55 @@ function drawCard() {
     sw = (R - L) / LEVELS.length;
   box(L, dy, R - L, 30, 8, null, "rgba(255,255,255,.22)");
   LEVELS.forEach((lv, i) => {
-    const on = i === level;
+    const on = i === level,
+      rec = best[`${songKey(e)}:${i}`];
     if (on) box(L + i * sw + 2, dy + 2, sw - 4, 26, 6, "#fff");
     text(
       lv.name,
       L + i * sw + sw / 2,
-      dy + 20,
+      rec ? dy + 14 : dy + 20,
       `800 11px ${MONO}`,
       on ? "#12081f" : "rgba(255,255,255,.5)",
     );
+    if (rec)
+      text(
+        rec.grade,
+        L + i * sw + sw / 2,
+        dy + 25,
+        `800 9px ${MONO}`,
+        on ? "#12081f" : "rgba(255,255,255,.7)",
+      );
     zone(L + i * sw, dy, sw, 30, () => setLevel(i));
   });
   const b = best[`${songKey(e)}:${level}`];
+  // one thin bar per instrument: the best accuracy it has reached at this level
+  const gap = 6,
+    bw = (R - L - gap * 3) / 4;
+  [0, 1, 2, 3].forEach((i) => {
+    const x = L + i * (bw + gap),
+      v = b?.tracks?.[i] ?? null;
+    box(x, dy + 40, bw, 3, 1.5, "rgba(255,255,255,.12)");
+    if (v !== null)
+      box(x, dy + 40, Math.max(3, bw * v), 3, 1.5, theme.colors[i]);
+  });
+  const bestLabel = `BEST · ${LEVELS[level].name}`;
   text(
-    `BEST · ${LEVELS[level].name}`,
+    bestLabel,
     L,
     dy + 60,
     `600 11px ${MONO}`,
     "rgba(255,255,255,.5)",
     "left",
   );
+  if (b?.clean)
+    text(
+      "◆ CLEAN",
+      L + tw(bestLabel, `600 11px ${MONO}`) + 12,
+      dy + 60,
+      `800 10px ${MONO}`,
+      "#3ddc97",
+      "left",
+    );
   text(
     b ? `${b.grade} · ${b.score.toLocaleString()}` : "not played yet",
     R,
