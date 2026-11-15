@@ -43,7 +43,7 @@ The first song you add downloads the ~180 MB separation model once.
 | J K L | | hit lanes |
 | Space / Esc | | pause |
 
-On the results screen, Enter / Space retries and Esc returns to song selection.
+On the results screen, Enter / Space retries and Esc returns to song selection. If your hits ran consistently early or late (20 or more hits, 15 ms or more on average), the results screen offers **T** to apply that correction to the audio offset, once per run.
 
 Choose a song’s look with **T** or the theme button on its sleeve: **Neon**, **Liquid Dream**, **Paper City** or **Circuit Cathedral**. **Shift+T** (or the default control beneath the sleeve) makes the current look the default for songs without a saved choice. Theme choices stay in this browser and do not change charts or timing.
 

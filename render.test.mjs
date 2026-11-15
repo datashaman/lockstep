@@ -223,6 +223,15 @@ vm.runInContext(`
 `, context);
 console.log('ok: per-instrument totals match scorekeeping, inactive notes excluded, capture drain, results states and restart');
 
+calls.length = 0;
+vm.runInContext(`
+  mode = 'over'; offset = 0; calibrated = false; run.hits = 30; tracks[0].timing = 30 * .028; drawResults();
+`, context);
+assert.ok(calls.some(([name, text]) => name === 'fillText' && text === 'apply +28 ms audio offset'), 'results offer the one-key correction');
+calls.length = 0;
+vm.runInContext(`mode = 'failed'; drawResults(); calibrated = true; mode = 'over'; drawResults(); tracks[0].timing = 0; reset();`, context);
+assert.ok(!calls.some(([name, text]) => name === 'fillText' && /audio offset/.test(text)), 'no offer on the failed screen or after applying');
+
 vm.runInContext(`
   reset(); song.synth = false; rt = 50;
   tracks[3].notes = [];

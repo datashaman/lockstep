@@ -92,3 +92,16 @@ await vm.runInContext(`
   })()
 `, context);
 await assert.rejects(vm.runInContext("decodeSong({ title: 'broken', lib: 'missing-chart' })", context), /missing its chart/);
+vm.runInContext(`
+  const offer = (hits, mean, start = 0) => { mode = 'over'; calibrated = false; offset = start; run.hits = hits; tracks = [{ timing: hits * mean }]; };
+  offer(30, .028); assert.equal(calibrationOffer(), .028, 'late hits offer a later offset');
+  handleKey({ key: 't' });
+  assert.equal(offset, .028); assert.equal(localStorage.lockstepOffset, .028, 'applied offset is saved');
+  assert.equal(calibrationOffer(), null, 'one correction per run'); handleKey({ key: 't' }); assert.equal(offset, .028);
+  calibrated = false; assert.equal(calibrationOffer(), .056, 'offer returns once a new run measures again');
+  offer(30, -.04); assert.equal(calibrationOffer(), -.04, 'early hits offer an earlier offset');
+  offer(10, .05); assert.equal(calibrationOffer(), null, 'too few hits'); handleKey({ key: 't' }); assert.equal(offset, 0);
+  offer(30, .005); assert.equal(calibrationOffer(), null, 'mean inside 15 ms'); handleKey({ key: 't' }); assert.equal(offset, 0);
+  offer(30, .028, .49); assert.equal(calibrationOffer(), .5, 'clamped at the limit'); offset = .5; assert.equal(calibrationOffer(), null, 'nothing left to apply at the limit');
+  offer(30, .028); mode = 'failed'; assert.equal(calibrationOffer(), null, 'failed screen never offers');
+`, context);
