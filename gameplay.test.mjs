@@ -11,6 +11,9 @@ import {
   applyGroove,
   findHittableNote,
   nextTrack,
+  startHold,
+  endHold,
+  HOLD_SCORE,
 } from "./lib/gameplay.js";
 const run = createRunState();
 const tracks = createTracks(
@@ -82,4 +85,60 @@ console.log(
   assert.deepEqual([stray.missStreak, stray.misses], [2, 1], "miss streak and misses untouched");
   assert.equal(accuracy(stray), 6 / 8, "strays count against accuracy");
   console.log("ok: strays reset the multiplier, cost groove and count against accuracy");
+}
+
+{
+  // Holds: a head judged like a tap, then the key stays down to the tail. Sixteenths are .125 s here.
+  const sixteenths = (from, to) => (to - from) * 8;
+  const beats = [0, 0.5, 1, 1.5, 2, 2.5, 3];
+  const build = (notes) => createTracks([{ name: "BASS", notes }], ["red"], 3, beats, [0, 2])[0];
+  const play = (notes) => {
+    const r = createRunState(),
+      t = build(notes),
+      n = t.notes[0];
+    r.multiplier = 2;
+    const { perfect } = recordHit(r, t, n, 0, 0.035);
+    startHold(t, n);
+    return { r, t, n, perfect, before: r.score };
+  };
+  const tap = build([[0, 0]]);
+  assert.equal(tap.notes[0].len, 0, "taps have no length");
+  assert.equal(tap.maxHold, 0);
+
+  let h = play([[0, 0, 1]]);
+  assert.equal(h.t.maxHold, 1);
+  assert.deepEqual([h.n.holding, h.t.holds.length, h.before], [true, 1, 30], "head scores like a tap");
+  let end = endHold(h.r, h.t, h.n, 1, 0.09, sixteenths);
+  assert.deepEqual(end, { complete: true, grooveGain: 1 }, "a hold carried to the tail restores 1 groove");
+  assert.equal(h.r.score - h.before, HOLD_SCORE * 2 * 8, "2 x multiplier per sixteenth of its length");
+  assert.deepEqual([h.n.holding, h.n.broken, h.t.holds.length], [false, false, 0]);
+
+  h = play([[0, 0, 1]]);
+  end = endHold(h.r, h.t, h.n, 1 - 0.05, 0.09, sixteenths);
+  assert.equal(end.complete, true, "releasing within one hit window of the tail still completes");
+  assert.equal(h.r.score - h.before, HOLD_SCORE * 2 * 8);
+
+  h = play([[0, 0, 1]]);
+  h.t.live = true;
+  end = endHold(h.r, h.t, h.n, 0.5, 0.09, sixteenths);
+  assert.deepEqual(end, { complete: false, grooveGain: 0 }, "an early release costs nothing else");
+  assert.equal(h.r.score - h.before, HOLD_SCORE * 2 * 4, "scores the sixteenths actually held");
+  assert.deepEqual([h.n.broken, h.n.ended, h.t.live, h.t.holds.length], [true, true, false, 0], "the stem drops to cue volume");
+
+  // A missed head is a miss as today, and its tail cannot be picked up.
+  const m = build([[0, 0, 1]]);
+  m.notes[0].missed = true;
+  assert.equal(findHittableNote(m, 0, 0.5, 0.09, (t) => t), undefined);
+
+  // Phrase capture needs every head, not the tail: a phrase ending in a hold captures while it is still held.
+  const c = build([[0, 0], [0.5, 1, 1]]);
+  const r = createRunState();
+  for (const n of c.notes) {
+    recordHit(r, c, n, 0, 0.035);
+    startHold(c, n);
+  }
+  assert.ok(c.notes.every((n) => n.hit), "every head hit");
+  assert.equal(c.notes[1].holding, true, "the last note is still held");
+  assert.equal(recordCapture(r, c, 0, 1, 8), 100);
+  console.log("ok: holds score by sixteenth, complete within a window of the tail, break early, and never block capture");
 }

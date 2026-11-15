@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { actionForKey } from "./lib/input-actions.js";
+import { actionForKey, releaseForKey } from "./lib/input-actions.js";
 for (const [key, lane] of [
   ["j", 0],
   ["K", 1],
@@ -23,6 +23,12 @@ for (const screen of ["failed", "play", "pause"])
   assert.equal(actionForKey(screen, "t"), null);
 assert.deepEqual(actionForKey("pause", "]"), { type: "calibrate", delta: 1 });
 assert.deepEqual(actionForKey("play", " "), { type: "pause" });
+for (const [key, lane] of [["j", 0], ["K", 1], ["l", 2]])
+  assert.deepEqual(releaseForKey("play", key), { type: "release", lane });
+for (const screen of ["title", "pause", "over", "failed", "find"])
+  assert.equal(releaseForKey(screen, "j"), null);
+for (const key of ["a", "Enter", " ", "jk", ""])
+  assert.equal(releaseForKey("play", key), null);
 for (const screen of ["loading", "find"])
   for (const key of ["j", "Enter", "ArrowLeft"])
     assert.equal(actionForKey(screen, key), null);

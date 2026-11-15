@@ -4,6 +4,7 @@
 /** @typedef {import('./lib/song').PlayableSong} PlayableSong */
 /** @typedef {import('./lib/song').Note} Note */
 /** @typedef {import('./lib/gameplay.js').GameTrack} GameTrack */
+/** @typedef {import('./lib/gameplay.js').GameNote} GameNote */
 /** @typedef {import('./lib/input-actions.js').InputAction} InputAction */
 /** @typedef {{key:string,shiftKey?:boolean,ctrlKey?:boolean,metaKey?:boolean,repeat?:boolean,timeStamp?:number,target?:EventTarget|null,preventDefault?:()=>void}} KeyInput */
 /** @typedef {string|CanvasGradient|CanvasPattern} CanvasStyle */
@@ -25,12 +26,14 @@ import {
   recordCapture,
   recordMiss,
   recordStray,
+  startHold,
+  endHold,
   accuracy,
   nextTrack,
   createTracks,
 } from "./lib/gameplay.js";
 const run = createRunState();
-import { actionForKey } from "./lib/input-actions.js";
+import { actionForKey, releaseForKey } from "./lib/input-actions.js";
 import { createStemPlayer } from "./lib/stem-player.js";
 import { createAudioEngine } from "./lib/audio-engine.js";
 import { createFrameStats } from "./lib/perf-stats.js";
@@ -40,6 +43,7 @@ import {
   extendBeatGrid,
   beatIndex,
   fractionalBar,
+  fractionalBeat,
   beatSlot,
   thinChart,
 } from "./lib/beat-grid.js";
@@ -1139,6 +1143,7 @@ const next = (dir) => nextTrack(tracks, run.currentTrack, dir);
 function move(dir) {
   const j = next(dir);
   if (j < 0) return;
+  releaseHolds();
   dash = { from: craftX(), to: trackX(j), at: rt };
   audio.playSwitch(ac.currentTime);
   tracks[run.currentTrack].live = false;
@@ -1166,6 +1171,7 @@ function tryHit(lane, timeStamp, t = pressedSongTime(timeStamp) ?? now()) {
   }
   const delta = audioTime(t) - audioTime(n.t);
   const { perfect, grooveGain } = recordHit(run, tr, n, delta, PERFECT);
+  startHold(tr, n);
   const x = trackX(run.currentTrack) + (lane - 1) * LW;
   changeGroove(grooveGain);
   if (song.synth && tr.kind)
@@ -1194,10 +1200,30 @@ function tryHit(lane, timeStamp, t = pressedSongTime(timeStamp) ?? now()) {
     audio.playCapture(n.bar); // stay put: the arrows show where you can go next
   }
 }
+/** A hold ends at song time t: its tail passed with the key down, or the key came up.
+ * @param {GameTrack} tr @param {GameNote} n @param {number} t */
+function finishHold(tr, n, t) {
+  const { grooveGain } = endHold(run, tr, n, t, LEVELS[level].win, (a, b) => {
+    return (fractionalBeat(beats, b) - fractionalBeat(beats, a)) * 4;
+  });
+  if (grooveGain) changeGroove(grooveGain);
+}
+/** Let go of held notes: one lane's, or all of them (pause, blur, switching track).
+ * @param {number} [lane] */
+function releaseHolds(lane = -1) {
+  if (mode !== "play") return;
+  const t = now();
+  for (const tr of tracks)
+    for (let i = tr.holds.length - 1; i >= 0; i--)
+      if (lane < 0 || tr.holds[i].lane === lane) finishHold(tr, tr.holds[i], t);
+}
 /** @param {import('./lib/input-actions').InputAction} action */
 /** @param {InputAction} action */
 function dispatchAction(action) {
   switch (action.type) {
+    case "release":
+      releaseHolds(action.lane);
+      break;
     case "calibrate":
       offset = clampOffset(
         Math.round((offset + action.delta * 0.01) * 100) / 100,
@@ -1306,6 +1332,11 @@ function handleKey(e) {
   if (action) dispatchAction(action);
 }
 addEventListener("keydown", handleKey);
+addEventListener("keyup", (/** @type {KeyInput} */ e) => {
+  const action = releaseForKey(mode, e.key);
+  if (action) dispatchAction(action);
+});
+addEventListener("blur", () => releaseHolds());
 // Native controls stay outside the canvas, so fingers never cover the timing line.
 const touchDock = document.getElementById("touch-controls");
 /** @type {Map<number,HTMLElement>} */
@@ -1331,9 +1362,11 @@ function bindTouchPad(button) {
     handleKey({ key: button.dataset.pad || "", timeStamp: e.timeStamp });
   });
   const release = (/** @type {PointerEvent} */ e) => {
-    touchPointers.delete(e.pointerId);
+    const wasDown = touchPointers.delete(e.pointerId);
     if (![...touchPointers.values()].includes(button))
       button.classList.remove("pressed");
+    const lane = "jkl".indexOf(button.dataset.pad || "");
+    if (wasDown && lane >= 0) dispatchAction({ type: "release", lane });
   };
   for (const event of /** @type {const} */ ([
     "pointerup",
@@ -1501,6 +1534,7 @@ function pauseGame() {
     return;
   }
   if (mode !== "play") return;
+  releaseHolds();
   const image = document.createElement("canvas");
   image.width = cv.width;
   image.height = cv.height;
@@ -1630,6 +1664,8 @@ function logic(t) {
         if (auto(tr, n) && tr.kind)
           audio.playNote(tr.kind, n.lane, n.bar, audioTime(n.t));
       }
+    for (let h = tr.holds.length - 1; h >= 0; h--)
+      if (t >= tr.holds[h].t + tr.holds[h].len) finishHold(tr, tr.holds[h], t);
     const judgedAt = audioTime(t);
     while (tr.judged < tr.notes.length) {
       const n = tr.notes[tr.judged];
