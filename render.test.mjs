@@ -670,6 +670,63 @@ vm.runInContext(`{
   assert.equal(JSON.stringify(run), idle, 'an idle player in sync changes nothing');
 }`, context);
 console.log('ok: encores double-score outside accuracy, extend every lock, pass between tracks, and a stray voids the phrase');
+{
+  // Scenery follows the music: stem energy through the extended grid, section hues, and the demo/reduced-motion fallbacks.
+  const probes = [];
+  const fill = canvas.fill, stroke = canvas.stroke, gradient = canvas.createLinearGradient;
+  canvas.createLinearGradient = (...args) => { record('createLinearGradient', args); return { addColorStop(_, color) { this.color = color; } }; };
+  canvas.fill = (...args) => { fill(...args); if (canvas.fillStyle?.color) probes.push(['floor', canvas.fillStyle.color, canvas.globalAlpha]); };
+  canvas.stroke = (...args) => { stroke(...args); if (canvas.lineWidth === 1.5) probes.push(['rail', canvas.strokeStyle, canvas.globalAlpha]); };
+  const alphas = (kind, track) => probes.filter(([k, c]) => k === kind && c === vm.runInContext(`tracks[${track}].color`, context)).map(p => p[2]);
+  const drawOnce = () => { probes.length = 0; vm.runInContext(`mode = 'play'; rt = 80; run.currentTrack = 0; updateEnergy(barAt(4)); draw(barAt(4), true)`, context); };
+  vm.runInContext(`
+    var barAt = k => song.beats[song.downbeat + 4 * k] + .01;
+    const built = down => {
+      const s = demoSong(); s.downbeat = down;
+      s.tracks[0].energy = Array.from({ length: s.beats.length }, (_, k) => k >= down && k < down + 32 ? 15 : 0);
+      s.sections = [0, 8]; return s;
+    };
+    for (const down of [0, 2]) {
+      song = built(down); setGrid(song); tracks = buildTracks(); phase = 0;
+      updateEnergy(barAt(2)); assert.equal(stemEnergy[0], 1, 'loud stem in bar 2, downbeat ' + down);
+      assert.equal(stemEnergy[1], 0, 'a stem without energy is silent');
+      updateEnergy(barAt(10)); assert.equal(stemEnergy[0], 0, 'quiet in bar 10, downbeat ' + down);
+      updateEnergy(-1); assert.equal(intensity, 0, 'zero before the first beat');
+      updateEnergy(song.duration + 5); assert.equal(intensity, 0, 'zero after the last');
+      updateEnergy(barAt(2)); assert.equal(intensity, .25, 'intensity is the mean');
+      const hues = Array.from({ length: 16 }, (_, k) => hueIndex(barAt(k)));
+      assert.deepEqual(hues, [...Array(8).fill(0), ...Array(8).fill(1)], 'hue changes at the section and nowhere else, downbeat ' + down);
+    }
+    phase = .5; updateEnergy(barAt(2)); const mid = stemEnergy[0]; assert.equal(mid, 1, 'blends toward the next beat');
+    song = demoSong(); setGrid(song); tracks = buildTracks();
+    assert.deepEqual(Array.from({ length: 6 }, (_, k) => hueIndex(barAt(k))), [0, 1, 2, 3, 4, 5], 'without sections the hue steps per bar');
+    updateEnergy(barAt(2)); assert.equal(reactive, false, 'the demo has no energy');
+  `, context);
+  vm.runInContext(`song = demoSong(); setGrid(song); tracks = buildTracks(); phase = 0;`, context);
+  drawOnce();
+  assert.ok(alphas('floor', 1).every(a => a === .07) && alphas('floor', 1).length, 'the demo keeps the fixed floor glow');
+  assert.ok(alphas('rail', 1).includes(.35), 'and the fixed rail alpha');
+
+  vm.runInContext(`
+    song = demoSong(); song.sections = [0, 8];
+    song.tracks[1].energy = Array.from({ length: song.beats.length }, () => 7.5);
+    setGrid(song); tracks = buildTracks(); phase = 0; hue = theme.hues[0];
+  `, context);
+  vm.runInContext(`updateEnergy(barAt(4)); assert.equal(reactive, true)`, context);
+  drawOnce();
+  const near = (list, v) => list.length && list.every(a => Math.abs(a - v) < 1e-9);
+  assert.ok(near(alphas('floor', 1), .05 + .1 * .5), 'floor glow follows the stem');
+  assert.ok(alphas('rail', 1).some(a => Math.abs(a - (.25 + .3 * .5)) < 1e-9), 'rail alpha follows the stem');
+  assert.ok(near(alphas('floor', 2), .05), 'a silent stem rests at the low end');
+
+  motion.matches = true;
+  drawOnce();
+  assert.ok(near(alphas('floor', 1), .07) && alphas('rail', 1).includes(.35), 'reduced motion keeps today\'s glow and rails');
+  vm.runInContext(`hue = theme.hues[0]; for (let i = 0; i < 300; i++) draw(barAt(9), true); assert.ok(Math.abs(hue - theme.hues[1]) < 1, 'reduced motion still changes hue at the section')`, context);
+  motion.matches = false;
+  Object.assign(canvas, { fill, stroke, createLinearGradient: gradient });
+}
+console.log('ok: stem energy through the extended grid, section hues, floor and rail response, demo and reduced-motion fallbacks');
 vm.runInContext(`
   Object.freeze(run);
   for (const track of tracks) {

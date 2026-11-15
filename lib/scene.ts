@@ -61,6 +61,11 @@ export interface SceneFrame {
   inSync: boolean;
   /** The encore is open: the current track's AUTO notes can be played for a bonus. */
   bonus: boolean;
+  /** Each stem's energy now (0..1) and their mean; read only when `reactive`. */
+  stemEnergy: number[];
+  intensity: number;
+  /** The song has per-beat energy and motion is allowed: scenery follows the stems. */
+  reactive: boolean;
   isCircuit: () => boolean;
   isLiquid: () => boolean;
   isPaper: () => boolean;

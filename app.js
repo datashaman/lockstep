@@ -270,6 +270,17 @@ let beats = [];
 /** @type {number[]} */
 let bars = [];
 let gridDown = 0;
+// Scenery follows the music: where chart beat 0 and bar 0 sit on the extended grid, and the stems' energy right now.
+let beatOffset = 0,
+  barOffset = 0,
+  intensity = 0,
+  reactive = false;
+const stemEnergy = [0, 0, 0, 0];
+// Coefficients, to be tuned by eye.
+const WARP_BASE = 0.6,
+  WARP_GAIN = 0.8,
+  BEND_BASE = 0.8,
+  BEND_GAIN = 0.4;
 let shown = 0,
   rt = 0,
   last = performance.now() / 1000,
@@ -432,6 +443,8 @@ const trackX = (i) => (i - 1.5) * (TW + GAP);
 /** @param {PlayableSong} song */
 function setGrid(song) {
   ({ beats, bars, downbeat: gridDown } = extendBeatGrid(song, LEAD_IN, LOOK));
+  beatOffset = gridDown - song.downbeat;
+  barOffset = beatIndex(bars, song.beats[song.downbeat]);
 }
 const idx = beatIndex;
 /** @param {number} time */
@@ -1819,6 +1832,7 @@ function frame() {
       ? 0
       : (t - beats[bi]) / (beats[bi + 1] - beats[bi]);
   pulse = Math.exp(-phase * 5);
+  updateEnergy(t);
   camTo = playing
     ? trackX(run.currentTrack)
     : reducedMotion?.matches
@@ -1830,7 +1844,9 @@ function frame() {
   shake = Math.max(0, shake - fdt * 40);
   const energy = playing ? 0.3 + (run.groove / 100) * 0.7 : 1;
   const warp =
-    (0.25 + pulse * 0.5 + (playing ? run.multiplier * 0.12 : 0)) * energy;
+    (0.25 + pulse * 0.5 + (playing ? run.multiplier * 0.12 : 0)) *
+    energy *
+    (reactive ? WARP_BASE + WARP_GAIN * intensity : 1);
   for (const s of stars) {
     if (reducedMotion?.matches) break;
     s.z -= fdt * warp;
@@ -2881,6 +2897,9 @@ const scene = createSceneRenderer(
     idx,
     inSync,
     bonus: encoreOpen(run, inSync),
+    stemEnergy,
+    intensity,
+    reactive,
     isCircuit,
     isLiquid,
     isPaper,
@@ -2930,22 +2949,53 @@ const {
   drawWorld,
   drawCraft,
 } = scene;
+/** Each stem's energy at song time t (0..1, blended between beats) and their mean; 0 outside the chart's beats.
+ * @param {number} t */
+function updateEnergy(t) {
+  const c = idx(beats, t) - beatOffset,
+    next = (c < 0 ? 0 : phase) / 15;
+  let sum = 0;
+  reactive = false;
+  for (let i = 0; i < stemEnergy.length; i++) {
+    const e = song.tracks[i]?.energy;
+    if (e) reactive = true;
+    stemEnergy[i] =
+      e && c >= 0 && c < e.length
+        ? (e[c] / 15) * (1 - phase) + (c + 1 < e.length ? e[c + 1] * next : 0)
+        : 0;
+    sum += stemEnergy[i];
+  }
+  intensity = sum / stemEnergy.length;
+  if (reducedMotion?.matches) reactive = false;
+}
+/** Index of the song section at time t, or the bar when the chart has none.
+ * @param {number} t */
+function hueIndex(t) {
+  const b = bar(t) - barOffset,
+    s = song.sections;
+  if (!s?.length) return Math.max(0, bar(t));
+  let n = 0;
+  for (let i = 1; i < s.length && s[i] <= b; i++) n = i;
+  return n;
+}
 /** @param {number} t @param {boolean} playing */
 function draw(t, playing) {
-  const b = bar(t),
-    dh = ((((theme.hues[b % 4] - hue) % 360) + 540) % 360) - 180;
+  const dh = ((((theme.hues[hueIndex(t) % 4] - hue) % 360) + 540) % 360) - 180;
   hue += dh * 0.04;
   // slow sways locked to the bar grid (one long left-right swing per 16 bars), swooping harder as the multiplier climbs
   const u = barF(t);
   bendAmp += ((playing ? 0.45 + run.multiplier * 0.07 : 0.6) - bendAmp) * 0.02;
+  const bendK = reactive ? BEND_BASE + BEND_GAIN * intensity : 1;
   bendX =
     (reducedMotion?.matches ? 0 : 190) *
     bendAmp *
+    bendK *
     Math.sin((u * Math.PI) / 8) *
     Math.cos((u * Math.PI) / 22);
   bendY =
     (reducedMotion?.matches ? 0 : 80) *
     bendAmp *
+    bendK *
     Math.sin((u * Math.PI) / 12 + 1);
 
   scene.renderScene(t, playing);
