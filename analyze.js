@@ -12,7 +12,7 @@ const SR = 22050,
   NB = NFFT / 2 + 1;
 // A centred 93 ms window makes onset-strength peaks lead the real attack; measured on synthetic stems (analyze.test.mjs).
 const LEAD = 0.034;
-export const CHART_V = 3; // bump when charting changes: stored songs are re-charted from their saved stems
+export const CHART_V = 4; // bump when charting changes: stored songs are re-charted from their saved stems
 /** @type {[string,string,[number,number] | null][]} */
 export const STEMS = [
   ["drums", "DRUMS", null],
@@ -440,7 +440,7 @@ function chart(y, ft, mixRms, beats, bars, pitch, density) {
  * @returns {import("./lib/song").SongChart} */
 export function analyze(
   stems,
-  { density = 2, bpm, onProgress = () => {} } = {},
+  { density = 4, bpm, onProgress = () => {} } = {},
 ) {
   if (![1, 2, 4].includes(density))
     throw new Error("Density must be 1, 2 or 4.");

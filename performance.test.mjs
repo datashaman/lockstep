@@ -129,7 +129,7 @@ const CEILINGS = {
   circuit: { calls: 4614, gradients: 9, blurs: 15 }, // measured 4194, 8, 13
 };
 const measured = vm.runInContext(`
-  level = 2;
+  level = 3; // EXPERT keeps every note, the worst case
   song = { ...demoSong(), synth: false, duration: 600,
     beats: Array.from({ length: 1201 }, (_, i) => i * .5),
     tracks: Array.from({ length: 4 }, (_, i) => ({ name: 'TRACK ' + i, notes: Array.from({ length: 4800 }, (_, j) => [j * .125, j % 3]) })) };
@@ -177,7 +177,7 @@ vm.runInContext(`
   assert.equal(frameStats, null);
   tracks.forEach(tr => tr.notes.forEach(n => (n.hit = true)));
   ac.currentTime = song.duration + LEAD_IN + 2; logic(now());
-  assert.equal(mode, 'over'); assert.ok(best['demo:2'], 'best saved');
+  assert.equal(mode, 'over'); assert.ok(best['demo:' + level], 'best saved');
 `, context);
 assert.equal(observers, 0, 'no long-task observer without ?perf');
 

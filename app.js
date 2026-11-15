@@ -64,6 +64,7 @@ const LEVELS = [
   { name: "EASY", win: 0.12 },
   { name: "NORMAL", win: 0.1 },
   { name: "HARD", win: 0.09 },
+  { name: "EXPERT", win: 0.08 },
 ];
 const CHORDS = [
   [57, 60, 64],
@@ -789,7 +790,7 @@ const pick = (i) => {
 };
 /** @param {number} lv */
 function setLevel(lv) {
-  level = Math.max(0, Math.min(2, lv));
+  level = Math.max(0, Math.min(LEVELS.length - 1, lv));
   if (globalThis.localStorage) localStorage.lockstepLevel = level;
   setGrid(song);
   tracks = buildTracks();
@@ -2383,7 +2384,7 @@ function drawCard() {
   );
   zone(L, defaultY, R - L, 22, () => chooseTheme(true));
   const dy = y + 252,
-    sw = (R - L) / 3;
+    sw = (R - L) / LEVELS.length;
   box(L, dy, R - L, 30, 8, null, "rgba(255,255,255,.22)");
   LEVELS.forEach((lv, i) => {
     const on = i === level;

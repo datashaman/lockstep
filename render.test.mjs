@@ -120,15 +120,20 @@ vm.runInContext(`
   mode = 'title'; catalog = [DEMO, ADD, FIND]; pvFor = DEMO;
   for (sel = 0; sel < catalog.length; sel++) { zones = []; drawCard(); assert.ok(zones.length > 0); }
   sel = 0; zones = []; drawCard();
-  assert.equal(zones.length, 6, 'theme, default, three difficulty controls and play');
+  assert.equal(zones.length, 7, 'theme, default, four difficulty controls and play');
   for (const z of zones) {
     assert.ok(z.x >= CARD.x && z.y >= CARD.y - 38 && z.x + z.w <= CARD.x + CARD.w && z.y + z.h <= CARD.y + CARD.h + 28);
   }
   zones[2].fn(); assert.equal(level, 0); setLevel(1);
+  const levelZones = zones.slice(2, 6); assert.equal(levelZones.length, LEVELS.length);
+  assert.ok(levelZones.every((z, i) => !i || z.x >= levelZones[i - 1].x + levelZones[i - 1].w), 'four difficulty segments do not overlap');
+  assert.deepEqual(LEVELS.map(l => l.name), ['EASY', 'NORMAL', 'HARD', 'EXPERT']);
+  setLevel(0); for (let i = 0; i < 5; i++) dispatchAction({ type: 'difficulty', delta: 1 });
+  assert.equal(level, 3, 'stepping right stops at EXPERT'); setLevel(1);
   const artwork = { x: CARD.x + 22, y: CARD.y + 14, w: CARD.w - 44, h: 140 };
   catalog = [{ title: 'Shared track', url: 'https://audius.co/artist/song', lib: 'shared', meta: { duration: 120, tracks: [] } }];
   zones = []; drawCard();
-  assert.equal(zones.length, 7, 'Audius adds a share control');
+  assert.equal(zones.length, 8, 'Audius adds a share control');
   for (const z of zones) assert.ok(z.x + z.w <= artwork.x || z.x >= artwork.x + artwork.w || z.y + z.h <= artwork.y || z.y >= artwork.y + artwork.h, 'controls never cover signature artwork');
   assert.ok(zones[0].y + zones[0].h < CARD.y && zones[1].y + zones[1].h < CARD.y, 'theme and share occupy the separate toolbar');
 

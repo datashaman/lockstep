@@ -71,3 +71,13 @@ for (const [name, bpmAt] of [['sinusoidal drift', t => 120 * (1 + .03 * Math.sin
   assert(steadyMax > .06, `${name}: a steady grid strays only ${(steadyMax * 1000).toFixed(0)} ms, so this test would not bite`);
   console.log(`ok: ${name} tracked, ${(share * 100).toFixed(0)}% within 15 ms, worst ${(max * 1000).toFixed(0)} ms vs steady ${(steadyMax * 1000).toFixed(0)} ms`);
 }
+
+// Density 4 is the default: sixteenth-note hi-hats chart on the off-sixteenth slots too.
+import { beatSlot } from './lib/beat-grid.js';
+const hats = Float32Array.from(drums);
+for (let s = 0; s < BARS * 16; s++) add(hats, OFFSET + s * SPB / 4, x => x < .03 ? noise() * .3 * Math.exp(-x * 100) : 0);
+const sixteenths = analyze({ drums: st(hats), bass: st(bass), vocals: st(vocals), other: st(other) });
+const offSlots = sixteenths.tracks[0].notes.filter(([t]) => beatSlot(sixteenths.beats, t)[1] % 2 === 1);
+assert(offSlots.length >= BARS * 4, `only ${offSlots.length} drum notes on off-sixteenth slots`);
+assert(offSlots.every(([t]) => off(t) < .005), 'off-sixteenth notes sit on the sixteenth grid');
+console.log(`ok: density 4 charts ${offSlots.length} off-sixteenth drum notes`);
