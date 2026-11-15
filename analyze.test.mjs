@@ -102,3 +102,46 @@ for (const chart of [song, forced, sixteenths, held]) {
     track.notes.forEach(([t, , len], i, all) => { if (len) assert(t + len < all[i + 1]?.[0] ?? Infinity, `${track.name}: hold at ${t} overlaps the next note`); });
 }
 console.log(`ok: ${sustained.length} sustained vocal notes became holds of ${(sustained[0][2] / SPB).toFixed(2)} beats; staccato notes and drums stay taps`);
+
+// Learnable phrases. First the step itself: eight 2-bar repeats of one riff whose independently assigned lanes
+// differ by up to two notes (what detuned pitches do) all come out with the first repeat's lanes.
+import { repeatLanes } from './analyze.js';
+{
+  const base = [0, 0, 1, 1, 1, 2, 2, 2], offsets = [0, 4, 8, 12, 16, 20, 24, 28];
+  const phrase = [], offset = [], lanes = [];
+  for (let p = 0; p < 8; p++) base.forEach((lane, k) => {
+    phrase.push(p); offset.push(offsets[k]);
+    lanes.push((p === 2 && k === 3) || (p === 4 && (k === 0 || k === 6)) || (p === 7 && k === 5) ? (lane + 1) % 3 : lane);
+  });
+  const patterns = out => Array.from({ length: 8 }, (_, p) => out.slice(p * 8, p * 8 + 8).join(''));
+  assert(new Set(patterns(lanes)).size > 1, 'the input repeats differ, so the test bites');
+  assert(patterns(repeatLanes(phrase, offset, lanes)).every(p => p === base.join('')), 'every repeat gets the first one\'s lanes');
+  // The same rhythm with the reversed melodic contour keeps its own lanes, and later clean repeats still match the riff.
+  const reversed = lanes.slice(); reversed.splice(40, 8, ...[...base].reverse());
+  const out = patterns(repeatLanes(phrase, offset, reversed));
+  assert.equal(out[5], [...base].reverse().join(''), 'reversed contour keeps its own lanes');
+  assert([0, 1, 2, 3, 4, 6, 7].every(p => out[p] === base.join('')));
+  // A different rhythm is never merged, however alike the lanes.
+  const shifted = offset.map((o, i) => (i >= 56 ? o + 2 : o));
+  assert.equal(patterns(repeatLanes(phrase, shifted, lanes))[7], patterns(lanes)[7], 'different rhythm keeps its lanes');
+  // Single pass in time order: the input is not mutated.
+  const before = lanes.join(''); repeatLanes(phrase, offset, lanes); assert.equal(lanes.join(''), before);
+}
+// End to end on a detuned bass riff (one note per beat, every pitch jittered by a seeded ±40 cents).
+let detune = 7; const cents = () => ((detune = (detune * 16807) % 2147483647) / 2147483647 * 2 - 1) * 40;
+const riffSong = options => {
+  detune = 7; // the same detune each time, so only the repeat step differs
+  const y = stem();
+  for (let b = 0; b < BARS * 4; b++) {
+    const m = [35, 42, 49, 38][b % 4] + cents() / 100;
+    add(y, OFFSET + b * SPB, x => x < SPB * .9 ? ((x * hz(m)) % 1 * 2 - 1) * .3 * Math.exp(-x * 3) : 0);
+  }
+  const chart = analyze({ drums: st(drums), bass: st(y), vocals: st(stem()), other: st(stem()) }, options), out = Array.from({ length: BARS / 2 }, () => []);
+  for (const [t, lane] of chart.tracks[1].notes) out[Math.min(out.length - 1, Math.floor((t - OFFSET + .05) / (8 * SPB)))].push(lane);
+  return out.map(p => p.join(''));
+};
+const withoutStep = riffSong({ repeatPhrases: false }), withStep = riffSong({});
+const distinct = p => new Set(p).size;
+assert(distinct(withoutStep) > 1, 'detuning makes repeats differ without the step');
+assert(distinct(withStep) < distinct(withoutStep), `repeats converge: ${withoutStep.join(' ')} -> ${withStep.join(' ')}`);
+console.log(`ok: repeats share lanes, a reversed contour and a different rhythm keep their own; detuned riff ${distinct(withoutStep)} -> ${distinct(withStep)} distinct patterns`);

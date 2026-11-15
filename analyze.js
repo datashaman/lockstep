@@ -13,7 +13,7 @@ const SR = 22050,
 // A centred 93 ms window makes onset-strength peaks lead the real attack; measured on synthetic stems (analyze.test.mjs).
 const LEAD = 0.034,
   HALF_WINDOW = NFFT / 2 / SR; // seconds from a frame's centre to its edge
-export const CHART_V = 5; // bump when charting changes: stored songs are re-charted from their saved stems
+export const CHART_V = 6; // bump when charting changes: stored songs are re-charted from their saved stems
 /** @type {[string,string,[number,number] | null][]} */
 export const STEMS = [
   ["drums", "DRUMS", null],
@@ -357,8 +357,8 @@ function yin(y, i, fmin, fmax) {
 // of the whole mix. Demucs always returns all four stems, so an instrumental's "vocals" is faint bleed with real onsets.
 const AUDIBLE = 0.1;
 /** @returns {import("./lib/song").Note[]}
- * @param {Float32Array} y @param {ReturnType<typeof features>} ft @param {Float32Array} mixRms @param {number[]} beats @param {number[]} bars @param {[number,number] | null} pitch @param {number} density */
-function chart(y, ft, mixRms, beats, bars, pitch, density) {
+ * @param {Float32Array} y @param {ReturnType<typeof features>} ft @param {Float32Array} mixRms @param {number[]} beats @param {number[]} bars @param {[number,number] | null} pitch @param {number} density @param {boolean} repeatPhrases */
+function chart(y, ft, mixRms, beats, bars, pitch, density, repeatPhrases) {
   const { env, rms } = ft,
     gate = 0.1 * pct(rms, 95),
     L = Math.round(LEAD * FPS);
@@ -433,6 +433,17 @@ function chart(y, ft, mixRms, beats, bars, pitch, density) {
         for (const i of idx) lanes[i] = Number(m[i] > lo) + Number(m[i] > hi); // < 1 semitone of movement: all middle lane
     }
   }
+  if (repeatPhrases) {
+    // the game's phrase: bars 2p and 2p + 1 (notes before the first bar belong to phrase 0)
+    const phrase = ts.map((t) => Math.max(0, beatIndex(bars, t)) >> 1);
+    lanes = repeatLanes(
+      phrase,
+      picks.map(
+        ([slot], i) => slot - beatIndex(beats, bars[2 * phrase[i]]) * 4,
+      ),
+      lanes,
+    );
+  }
   const lengths = pitch ? holdLengths(rms, picks, g16, L) : [];
   return ts.map((t, i) => {
     const note = /** @type {import("./lib/song").Note} */ ([
@@ -442,6 +453,34 @@ function chart(y, ft, mixRms, beats, bars, pitch, density) {
     if (lengths[i]) note.push(Math.round(lengths[i] * 1e4) / 1e4);
     return note;
   });
+}
+
+// Learnable phrases: when a riff repeats (same rhythm, mostly the same lanes), every repeat plays the first one's lanes,
+// so small pitch-detection differences do not change what the player learned. A phrase is the game's 2-bar unit.
+// ponytail: lanes only. A repeat with one extra or one missing onset stays different; repairing rhythm from repeats is the upgrade.
+/** @param {number[]} phrase phrase index per note @param {number[]} offset sixteenth slots from the phrase start per note
+ * @param {number[]} lanes independently assigned lanes per note, in time order
+ * @returns {number[]} lanes with repeats of a phrase copied from its first occurrence */
+export function repeatLanes(phrase, offset, lanes) {
+  const out = lanes.slice(),
+    /** @type {{ rhythm: string, lanes: number[] }[]} */
+    canonical = [],
+    /** @type {Map<number, number[]>} */
+    groups = new Map();
+  phrase.forEach((p, i) => groups.set(p, [...(groups.get(p) || []), i]));
+  for (const idx of groups.values()) {
+    const rhythm = idx.map((i) => offset[i]).join(","),
+      mine = idx.map((i) => lanes[i]),
+      same = canonical.find(
+        (c) =>
+          c.rhythm === rhythm &&
+          c.lanes.filter((lane, k) => lane === mine[k]).length >=
+            0.75 * mine.length,
+      );
+    if (same) idx.forEach((i, k) => (out[i] = same.lanes[k]));
+    else canonical.push({ rhythm, lanes: mine });
+  }
+  return out;
 }
 
 // Sustained pitched notes become holds: follow the stem's loudness from each attack while it stays at or above half
@@ -470,11 +509,11 @@ function holdLengths(rms, picks, g16, L) {
 }
 
 /** @param {Record<string,{left:Float32Array,right:Float32Array}>} stems
- * @param {{density?:number,bpm?:number,onProgress?:(progress:number)=>void}} [options]
+ * @param {{density?:number,bpm?:number,onProgress?:(progress:number)=>void,repeatPhrases?:boolean}} [options]
  * @returns {import("./lib/song").SongChart} */
 export function analyze(
   stems,
-  { density = 4, bpm, onProgress = () => {} } = {},
+  { density = 4, bpm, onProgress = () => {}, repeatPhrases = true } = {},
 ) {
   if (![1, 2, 4].includes(density))
     throw new Error("Density must be 1, 2 or 4.");
@@ -532,7 +571,16 @@ export function analyze(
   const tracks = STEMS.map(([s, name, pitch]) => ({
     name,
     stem: s,
-    notes: chart(ys[s], ft[s], mixFt.rms, beats, bars, pitch, density),
+    notes: chart(
+      ys[s],
+      ft[s],
+      mixFt.rms,
+      beats,
+      bars,
+      pitch,
+      density,
+      repeatPhrases,
+    ),
   }));
   onProgress(1);
   return {
