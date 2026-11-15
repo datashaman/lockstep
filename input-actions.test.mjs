@@ -18,6 +18,9 @@ assert.deepEqual(actionForKey("title", "T", true), {
   type: "theme",
   useAsDefault: true,
 });
+assert.deepEqual(actionForKey("over", "t"), { type: "autoCalibrate" });
+for (const screen of ["failed", "play", "pause"])
+  assert.equal(actionForKey(screen, "t"), null);
 assert.deepEqual(actionForKey("pause", "]"), { type: "calibrate", delta: 1 });
 assert.deepEqual(actionForKey("play", " "), { type: "pause" });
 for (const screen of ["loading", "find"])

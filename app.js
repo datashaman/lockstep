@@ -243,7 +243,17 @@ function clampOffset(value) {
   return Number.isFinite(value) ? Math.max(-0.5, Math.min(0.5, value)) : 0;
 }
 let offset = clampOffset(+(globalThis.localStorage?.lockstepOffset || 0)),
-  offsetAt = -9; // player's audio calibration, seconds
+  offsetAt = -9, // player's audio calibration, seconds
+  calibrated = false; // one correction per run: its mean no longer describes the new offset
+/** Offset that would zero this run's mean timing, or null when no offer applies.
+ * A positive mean is late, and now() subtracts offset, so the fix adds the mean. */
+function calibrationOffer() {
+  if (mode !== "over" || calibrated || run.hits < 20) return null;
+  const mean = tracks.reduce((sum, tr) => sum + tr.timing, 0) / run.hits;
+  if (Math.abs(mean) < 0.015) return null;
+  const next = clampOffset(Math.round((offset + mean) * 1000) / 1000);
+  return next === offset ? null : next;
+}
 /** @type {number[]} */
 let beats = [];
 /** @type {number[]} */
@@ -434,6 +444,7 @@ const stopStems = () => stemPlayer?.stop();
 /** @param {HTMLCanvasElement | null} [menuImage] */
 function reset(menuImage = null) {
   Object.assign(run, createRunState());
+  calibrated = false;
   setGrid(song);
   tracks = buildTracks();
   run.currentTrack = Math.max(
@@ -1184,6 +1195,15 @@ function dispatchAction(action) {
       offsetAt = rt;
       if (globalThis.localStorage) localStorage.lockstepOffset = offset;
       break;
+    case "autoCalibrate": {
+      const next = calibrationOffer();
+      if (next === null) break;
+      offset = next;
+      offsetAt = rt;
+      calibrated = true;
+      if (globalThis.localStorage) localStorage.lockstepOffset = offset;
+      break;
+    }
     case "resume":
       if (pauseState?.deadline) pauseState.deadline = 0;
       else resumeCountdown();
@@ -1338,6 +1358,7 @@ function updateTouchControls() {
     level,
     theme.name,
     offset,
+    calibrationOffer(),
     run.currentTrack,
     pauseState?.deadline,
     pauseState?.busy,
@@ -1368,6 +1389,7 @@ function updateTouchControls() {
   /** @type {HTMLButtonElement} */ (
     document.getElementById("touch-default")
   ).disabled = mode !== "title";
+  requiredElement("touch-calibrate").hidden = calibrationOffer() === null;
   requiredElement("touch-offset").textContent =
     `Audio offset: ${Math.round(offset * 1000)} ms`;
   /** @type {HTMLButtonElement} */ (
@@ -2670,6 +2692,17 @@ function drawResults() {
     newBest ? "#3ddc97" : "#a6b6c8",
     "right",
   );
+  const offer = calibrationOffer();
+  if (offer !== null) {
+    const ms = Math.round((offer - offset) * 1000);
+    shortcut(
+      "T",
+      `apply ${ms > 0 ? "+" : "−"}${Math.abs(ms)} ms audio offset`,
+      620,
+      334,
+      `600 12px ${MONO}`,
+    );
+  }
   text("INSTRUMENT", 64, 365, `700 10px ${MONO}`, "#a6b6c8", "left");
   text("HITS / MISSES", 380, 365, `700 10px ${MONO}`, "#a6b6c8", "right");
   text("ACCURACY", 500, 365, `700 10px ${MONO}`, "#a6b6c8", "right");
