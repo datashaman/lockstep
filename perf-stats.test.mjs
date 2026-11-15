@@ -41,9 +41,13 @@ assert.deepEqual(empty, {
   p50: 0,
   p95: 0,
   p99: 0,
+  medianDelta: 0,
   dropped: 0,
   longFrames: 0,
 });
+const steady = createFrameStats();
+for (let i = 0; i < 5; i++) steady.record(1, 16.5);
+assert.equal(Math.round(1000 / steady.summary().medianDelta), 61, "the median frame time gives the frame rate");
 console.log(
   "ok: nearest-rank percentiles, dropped frames at 60 and 120 Hz, ring wrap and empty runs",
 );

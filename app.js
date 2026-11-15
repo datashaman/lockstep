@@ -175,7 +175,15 @@ function context2D(canvas) {
 }
 const cv = /** @type {HTMLCanvasElement} */ (requiredElement("c")),
   g = context2D(cv),
-  DPR = Math.min(2, globalThis.devicePixelRatio || 1);
+  // ?dpr=1 renders at that pixel ratio instead of the display's (capped at 2), to see whether resolution is what makes a browser slow.
+  DPR = Math.min(
+    2,
+    Number(
+      globalThis.location && new URL(location.href).searchParams.get("dpr"),
+    ) ||
+      globalThis.devicePixelRatio ||
+      1,
+  );
 cv.width = W * DPR;
 cv.height = H * DPR;
 const reducedMotion = globalThis.matchMedia?.(
@@ -1985,6 +1993,7 @@ function finishPerf() {
       level: LEVELS[level].name,
       theme: theme.name,
       dpr: DPR,
+      fps: Math.round(1000 / s.medianDelta),
       autoplay: AUTOPLAY,
       frames: s.frames,
       p50: ms(s.p50),
@@ -1995,7 +2004,7 @@ function finishPerf() {
       longTasks,
     }),
   );
-  perfLine = `PERF ${s.frames} frames · script p50 ${ms(s.p50)} p95 ${ms(s.p95)} p99 ${ms(s.p99)} ms · dropped ${(s.dropped * 100).toFixed(2)}% · long frames ${s.longFrames} · long tasks ${longTasks ?? "n/a"}`;
+  perfLine = `PERF ${s.frames} frames · ${Math.round(1000 / s.medianDelta)} fps · ${theme.name} · dpr ${DPR} · script p50 ${ms(s.p50)} p95 ${ms(s.p95)} p99 ${ms(s.p99)} ms · dropped ${(s.dropped * 100).toFixed(2)}% · long frames ${s.longFrames} · long tasks ${longTasks ?? "n/a"}`;
 }
 function frame() {
   const started = performance.now();
