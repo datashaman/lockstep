@@ -1955,13 +1955,13 @@ function phraseInProgress(tr) {
 }
 /** ?autoplay: hit each note as it arrives, and keep to the track that has something to play soonest. Moves early, so
  * the craft is in place before the notes arrive, in whichever direction that is. It leaves the current track only
- * when that track has nothing to play for a bar and is not part-way through a phrase.
+ * when that track has nothing to play for a bar, is not part-way through a phrase and is not holding a note (moving releases it).
  * @param {number} t */
 function autoplayStep(t) {
   const current = run.currentTrack,
     here = tracks[current];
   let target = current;
-  if (here && !phraseInProgress(here)) {
+  if (here && !here.holds.length && !phraseInProgress(here)) {
     const stay = nextPlayable(here),
       span =
         bars[Math.max(0, bar(t)) + 1] - bars[Math.max(0, bar(t))] || BARLEN;
