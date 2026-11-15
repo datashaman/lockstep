@@ -24,6 +24,8 @@ import {
   recordHit,
   recordCapture,
   recordMiss,
+  recordStray,
+  accuracy,
   nextTrack,
   createTracks,
 } from "./lib/gameplay.js";
@@ -513,7 +515,7 @@ function saveBest() {
   if (newBest) {
     best[k] = {
       score: run.score,
-      grade: grade(run.hits / Math.max(1, run.hits + run.misses)),
+      grade: grade(accuracy(run)),
     };
     try {
       localStorage.lockstepBest = JSON.stringify(best);
@@ -1142,7 +1144,14 @@ function tryHit(lane, timeStamp, t = pressedSongTime(timeStamp) ?? now()) {
   const tr = tracks[run.currentTrack];
   const window = LEVELS[level].win;
   const n = findHittableNote(tr, lane, t, window, audioTime);
-  if (!n) return; // shortcut: no penalty for stray presses
+  if (!n) {
+    // A stray costs groove once the song has started, unless the track is locked or silent.
+    if (t >= 0 && tr && playable(tr, t)) {
+      changeGroove(recordStray(run, tr));
+      missAt = rt;
+    }
+    return;
+  }
   const delta = audioTime(t) - audioTime(n.t);
   const { perfect, grooveGain } = recordHit(run, tr, n, delta, PERFECT);
   const x = trackX(run.currentTrack) + (lane - 1) * LW;
@@ -2582,7 +2591,7 @@ function drawFailure() {
   });
 }
 function drawResults() {
-  const acc = run.hits / Math.max(1, run.hits + run.misses),
+  const acc = accuracy(run),
     gr = grade(acc),
     record = best[`${playKey}:${level}`];
   const [title, artist = ""] = song.title.split(" — ");
@@ -2642,7 +2651,7 @@ function drawResults() {
     "right",
   );
   text(
-    `${run.captures} CAPTURES`,
+    `${run.captures} CAPTURES · ${run.strays} STRAYS`,
     752,
     264,
     `600 12px ${MONO}`,
