@@ -37,6 +37,15 @@ for (const screen of ["loading", "find"])
     assert.equal(actionForKey(screen, key), null);
 for (const key of ["", "jk", "unknown"])
   assert.equal(actionForKey("play", key), null);
+assert.deepEqual(actionForKey("title", "p"), { type: "practice" });
+for (const screen of ["play", "pause", "over", "failed"])
+  assert.equal(actionForKey(screen, "p"), null, "practice starts from the title only");
+assert.deepEqual(actionForKey("play", "-"), { type: "speed", delta: -1 });
+assert.deepEqual(actionForKey("play", "="), { type: "speed", delta: 1 });
+assert.deepEqual(actionForKey("play", "b"), { type: "loop" });
+assert.deepEqual(actionForKey("play", "B"), { type: "loop" });
+for (const screen of ["title", "pause", "over", "failed"])
+  for (const key of ["-", "=", "b"]) assert.equal(actionForKey(screen, key), null);
 console.log(
   "ok: context-sensitive keyboard/touch actions, modifiers, calibration and inactive screens",
 );

@@ -680,6 +680,80 @@ console.log('ok: challenge links round-trip, set the level, show on the HUD and 
 }
 console.log('ok: mastery marks follow the level, CLEAN, wrong-typed records, run merging and failed runs');
 
+{
+  // Practice: no failure, a loop that seeks back, a slower transport judged in real milliseconds, nothing saved.
+  const texts = [], fillText = canvas.fillText;
+  canvas.fillText = (...args) => { fillText(...args); texts.push(args[0]); };
+  vm.runInContext(`{
+    song = demoSong(); song.synth = false; ac = { currentTime: 0 }; localStorage = { lockstepBest: 'untouched' };
+    audio.playCapture = () => {}; audio.playCountIn = () => {};
+    practice = true; practiceRate = 1; loop = null; reset(); mode = 'play'; offset = 0;
+    assert.equal(tempo[0].rate, 1);
+
+    // Miss 40 notes in a row: the run goes on at full groove.
+    const mk = t => ({ t, lane: 0, bar: bar(t), hit: false, missed: false, len: 0, holding: false, ended: false, broken: false });
+    tracks.forEach(tr => { tr.notes = []; tr.judged = 0; });
+    tracks[0].notes = Array.from({ length: 40 }, (_, k) => mk(k * .25 + 4));
+    cur = 0; run.currentTrack = 0; ac.currentTime = 100; t0 = 0; logic(30);
+    assert.deepEqual([run.misses, run.groove, mode], [40, 100, 'play'], 'forty misses in practice');
+    assert.equal(tempo.at(-1).rate, 1, 'and no groove slowdown');
+
+    // A fully hit phrase shows PHRASE CLEAR and the track stays playable (nothing locks).
+    reset(); mode = 'play'; tracks.forEach(tr => { tr.notes = []; tr.judged = 0; });
+    tracks[0].notes = [mk(bars[0]), mk(bars[0] + .1)]; cur = 0; run.currentTrack = 0; t0 = 0; ac.currentTime = bars[0];
+    tryHit(0, undefined, bars[0]); tryHit(0, undefined, bars[0] + .1);
+    assert.ok(tracks[0].notes.every(n => n.hit), 'the whole phrase was hit'); assert.equal(run.captures, 0);
+    assert.ok(pops.some(p => p.text === 'PHRASE CLEAR'), 'PHRASE CLEAR is shown');
+    assert.ok(!locked(tracks[0], bars[0]), 'practice never locks a phrase');
+  }`, context);
+  vm.runInContext(`{
+    // Loop one phrase, run past its end: back one bar before its start, with its notes playable again.
+    song = demoSong(); song.synth = false; ac = { currentTime: 50 }; practice = true; practiceRate = 1; loop = null; reset(); mode = 'play';
+    const t1 = bars[2] + .1;
+    toggleLoop(t1); assert.deepEqual({ ...loop }, { from: bars[2], to: null });
+    toggleLoop(t1); assert.deepEqual({ ...loop }, { from: bars[2], to: bars[4] }, 'B twice loops the phrase');
+    for (const tr of tracks) { tr.judged = tr.notes.length; for (const n of tr.notes) if (n.t >= bars[1]) n.hit = true; }
+    ac.currentTime = 60; logic(bars[4] + .01);
+    assert.ok(Math.abs(now() - (bars[1] - SEEK_LEAD)) < 1e-9, 'one bar before the loop start (less the lead)');
+    assert.ok(Math.abs(sched - (bars[1] - SEEK_LEAD)) < 1e-9);
+    for (const tr of tracks) {
+      assert.equal(tr.judged, noteIndex(tr.notes, bars[1]), 'judged cursor at the pre-roll');
+      assert.ok(tr.notes.every(n => !n.hit && !n.missed), 'notes from the pre-roll on are unhit');
+    }
+    toggleLoop(t1); assert.equal(loop, null, 'a third B clears it');
+    ac.currentTime = 70; const before = t0; logic(bars[4] + .5); assert.equal(t0, before, 'no loop, no seek');
+
+    // The speed steps from 1.0 to 0.5 by tenths; hit windows stay in real milliseconds.
+    for (let i = 0; i < 9; i++) stepRate(-1); assert.equal(practiceRate, .5, 'clamped at 0.5');
+    for (let i = 0; i < 9; i++) stepRate(1); assert.equal(practiceRate, 1, 'and at 1.0');
+    for (let i = 0; i < 3; i++) stepRate(-1); assert.equal(practiceRate, .7);
+    assert.equal(tempo.at(-1).rate, .7);
+    const note = tracks[0].notes[10]; cur = 0; run.currentTrack = 0; note.hit = false; note.missed = false;
+    ac.currentTime = audioTime(note.t) + .05; tryHit(note.lane);
+    assert.equal(pops.at(-1).text, '50 ms LATE', 'a press 50 ms late at 0.7 speed is 50 ms late');
+    assert.equal(run.groove, 100);
+
+    // Seeking resets the transport to one segment at the current rate.
+    seek(bars[4]); assert.equal(tempo.length, 1); assert.equal(tempo[0].rate, .7);
+  }`, context);
+  // Finishing a practice run saves nothing and says so.
+  vm.runInContext(`{
+    song = demoSong(); song.synth = false; ac = { currentTime: 0 }; localStorage = { lockstepBest: 'untouched' };
+    practice = true; reset(); mode = 'play'; playKey = 'demo'; best = {}; tracks.forEach(tr => { tr.notes = []; tr.judged = 0; });
+    run.score = 5000; run.hits = 50; run.captures = 3; logic(song.duration + 2);
+    assert.equal(mode, 'over'); assert.equal(localStorage.lockstepBest, 'untouched'); assert.deepEqual({ ...best }, {}); assert.equal(newBest, false);
+  }`, context);
+  texts.length = 0; vm.runInContext('drawResults()', context);
+  assert.ok(texts.some(t => /^PRACTICE \/ /.test(t)) && texts.includes('PRACTICE · BEST NOT SAVED'), 'results are labelled PRACTICE');
+  vm.runInContext(`{
+    practice = false; reset(); mode = 'play'; tracks.forEach(tr => { tr.notes = []; tr.judged = 0; }); run.score = 5000; run.hits = 50; run.captures = 3; logic(song.duration + 2);
+    assert.notEqual(localStorage.lockstepBest, 'untouched', 'the same run outside practice does save');
+    toTitle(); assert.equal(practice, false);
+  }`, context);
+  canvas.fillText = fillText;
+}
+console.log('ok: practice never fails or locks, loops by seeking, judges slowed presses in real milliseconds and saves nothing');
+
 const beforeSnapshots = snapshots;
 vm.runInContext("mode = 'title'; scene.renderScene(1, false)", context);
 assert.equal(snapshots - beforeSnapshots, 1, 'one frame snapshot, including nested menu text calls');

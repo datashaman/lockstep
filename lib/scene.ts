@@ -68,6 +68,10 @@ export interface SceneFrame {
   reactive: boolean;
   /** A friend's score to beat from a share link, or -1. */
   target: number;
+  /** Practice speed (0.5–1), or 0 outside practice. */
+  practice: number;
+  /** The looped phrase range, or just its start while `to` is null. */
+  loop: { from: number; to: number | null } | null;
   isCircuit: () => boolean;
   isLiquid: () => boolean;
   isPaper: () => boolean;

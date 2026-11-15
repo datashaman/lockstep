@@ -33,6 +33,24 @@ for (let cycle = 0; cycle < 20; cycle++) {
   assert.equal(sources[0].stops.length, 0, 'naturally ended sources are not stopped again');
 }
 
+{
+  // Practice seeks: every source starts at the same time, at the same offset and rate; before the audio it waits.
+  const at = nodes.length;
+  player.start(buffers, 4, { offset: 12.5, rate: .7 });
+  const seeked = sourcesSince(at);
+  assert.deepEqual(seeked.map(source => source.starts), [[4], [4], [4], [4]]);
+  assert.deepEqual(seeked.map(source => source.offsets), [[12.5], [12.5], [12.5], [12.5]]);
+  assert.ok(seeked.every(source => source.playbackRate.value === .7), 'the initial rate is set without automation');
+  assert.ok(seeked.every(source => source.playbackRate.events.length === 0));
+  const early = nodes.length;
+  player.start(buffers, 4, { offset: -1.4, rate: .7 });
+  const delayed = sourcesSince(early);
+  assert.ok(delayed.every(source => source.starts.length === 1 && Math.abs(source.starts[0] - (4 + 1.4 / .7)) < 1e-9), 'a pre-roll before 0 starts later by the time to reach 0');
+  assert.ok(delayed.every(source => !source.offsets[0]), 'and never asks for a negative offset');
+  player.stop();
+  assert.equal(countEdges(), baseline);
+}
+
 let first = nodes.length;
 preview.start(buffers, 10, { volume: .35, loop: {from:30,to:120} });
 const previewSources = sourcesSince(first);
