@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn a mixed song into a Lockstep song: Demucs stems + beat grid + one note chart per stem.
 
-usage: .venv/bin/python prep.py path/to/song.mp3 [--title "Name"] [--bpm 128] [--density 2]
+usage: .venv/bin/python prep.py path/to/song.mp3 [--title "Name"] [--bpm 128] [--density 4]
 
 Writes songs/<slug>/{song.json, drums.mp3, bass.mp3, vocals.mp3, other.mp3} and updates songs/index.json.
 Separated WAVs are cached by source hash in .cache/<sha256>/ so re-charting (e.g. a different --density) skips Demucs.
@@ -25,7 +25,7 @@ def separate(src, cache):
     shutil.rmtree(out)
 
 
-def chart_stems(stems, bpm=None, density=2):
+def chart_stems(stems, bpm=None, density=4):
     """Use the browser analyzer; only decoding/separation and output files belong to Python."""
     options = {'density': density}
     if bpm is not None:
@@ -58,7 +58,7 @@ def main():
     ap.add_argument('src', type=Path)
     ap.add_argument('--title')
     ap.add_argument('--bpm', type=float, help='force tempo if beat tracking picks half/double time')
-    ap.add_argument('--density', type=int, default=2, choices=[1, 2, 4], help='max notes per beat per track')
+    ap.add_argument('--density', type=int, default=4, choices=[1, 2, 4], help='max notes per beat per track')
     a = ap.parse_args()
     if not shutil.which("node"):
         ap.error("Node.js is required for the shared chart analyzer.")

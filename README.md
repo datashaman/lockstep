@@ -58,12 +58,12 @@ Hits outside the perfect window show how many milliseconds early or late they we
 You can move onto captured (AUTO) tracks and back out again; silent tracks are skipped.
 
 The title screen also works with the mouse: click a song to select it and again to play, or click the buttons.
-Your best grade and score for each song and difficulty are kept in this browser.
+Four difficulties thin the same stored chart at play time: **EASY** (about one note per beat), **NORMAL** (eighth notes), **HARD** (one note per eighth, including off-beat sixteenths where the eighth itself is empty) and **EXPERT** (every sixteenth). Your best grade and score for each song and difficulty are kept in this browser.
 
 ## Offline charting (optional)
 
 `prep.py` separates audio in Python, runs the shared `analyze.js` chart engine through Node.js, and writes `songs/<slug>/` for songs served
-with the game. Stem caches are keyed by the source audio hash. Reusing a title with different audio is rejected; choose a different `--title`. Existing output directories without a source hash are also protected from overwriting. Setup: `uv venv && uv pip install demucs librosa soundfile`, plus Node.js 24 and `ffmpeg` on PATH; run with `.venv/bin/python prep.py song.mp3`. Songs whose tempo drifts get a beat grid that follows it (`grid: "tracked"` in the chart); steady songs and `--bpm` keep one fixed tempo. `--bpm` accepts 20–400 BPM; `--density` accepts 1, 2 or 4 notes per beat. Existing shipped charts stay unchanged until regenerated.
+with the game. Stem caches are keyed by the source audio hash. Reusing a title with different audio is rejected; choose a different `--title`. Existing output directories without a source hash are also protected from overwriting. Setup: `uv venv && uv pip install demucs librosa soundfile`, plus Node.js 24 and `ffmpeg` on PATH; run with `.venv/bin/python prep.py song.mp3`. Songs whose tempo drifts get a beat grid that follows it (`grid: "tracked"` in the chart); steady songs and `--bpm` keep one fixed tempo. `--bpm` accepts 20–400 BPM; `--density` accepts 1, 2 or 4 notes per beat (default 4; the game thins the chart per difficulty). Existing shipped charts stay unchanged until regenerated.
 Do not commit songs you don't own the rights to; `.gitignore` keeps everything but the generated test song out.
 
 ## Development

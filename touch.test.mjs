@@ -19,6 +19,11 @@ for (const [saved, expected] of [['-999', -.5], ['garbage', 0], ['Infinity', 0],
   vm.runInContext(source, reload);
   assert.equal(vm.runInContext('offset', reload), expected);
 }
+{
+  const saved = vm.createContext({ ...context, localStorage: { lockstepLevel: '2' } });
+  vm.runInContext(source, saved);
+  assert.equal(vm.runInContext('LEVELS[level].name', saved), 'HARD', 'a saved level of 2 is still HARD');
+}
 function button(key) {
   const events = {}, classes = new Set();
   const b = { dataset: { pad: key }, addEventListener: (name, fn) => events[name] = fn, setPointerCapture() {}, classList: { add: c => classes.add(c), remove: c => classes.delete(c) } };
