@@ -582,6 +582,64 @@ await vm.runInContext(`(async () => {
 })()`, context);
 console.log('ok: Audius-only share URLs, resolver validation, unavailable tracks, import completion/errors, deduplication, cancel and cached playback');
 
+context.location = { href: 'https://game.example/lockstep/' };
+{
+  const texts = [], fillText = canvas.fillText;
+  canvas.fillText = (...args) => { fillText(...args); texts.push([args[0], canvas.fillStyle]); };
+  const has = (text, color) => texts.some(([t, c]) => t === text && (!color || c === color));
+  await vm.runInContext(`(async () => {
+    const meta = { v: 7, duration: 60, beats: [], downbeat: 0, tracks: [{ name: 'A', notes: [[0, 0], [1, 1]] }] };
+    const e = { title: 'Song — Artist', lib: 'id1', url: 'https://audius.co/artist/song', meta };
+    best = {}; level = 1;
+    assert.equal(new URL(shareLink(e)).searchParams.size, 1, 'no best: the plain link, audius only');
+    best['id1:1'] = { score: 48200, grade: 'A' };
+    const link = new URL(shareLink(e));
+    assert.deepEqual([...link.searchParams.keys()].sort(), ['audius', 'chart', 'level', 'score'], 'nothing but the challenge rides along');
+    assert.equal(JSON.stringify(challengeFrom(link.searchParams, LEVELS.length)), JSON.stringify({ score: 48200, level: 1, chart: chartHash(meta) }), 'reads back what was written');
+    level = 2; assert.equal(new URL(shareLink(e)).searchParams.size, 1, 'a best on another level does not count');
+    assert.equal(shareLink({ ...e, meta: undefined }), shareLink({ ...e, meta: undefined }), 'no chart, no challenge');
+    assert.equal(new URL(shareLink({ ...e, lib: 'other', meta })).searchParams.size, 1, 'a song without a best');
+
+    // Opening a challenge link for a song already in the library.
+    let startedAt = null, dialogOpen = true, button;
+    trackDialog = () => ({ d: { get open() { return dialogOpen; }, insertBefore: b => button = b, close: () => { dialogOpen = false; } }, status: {}, close: {} });
+    document.createElement = () => ({ focus() {} });
+    resolveSharedTrack = async () => ({ id: 'abc', title: 'Song', user: { name: 'Artist' }, permalink: '/artist/song' });
+    ac = { resume: async () => {} }; previewPlayer = undefined; setInterval = () => 1; clearInterval = () => {};
+    start = async () => { startedAt = level; };
+    library = [e]; catalog = [e]; level = 0;
+    await openSharedTrack('https://audius.co/artist/song', { score: 48200, level: 3, chart: chartHash(meta) });
+    await button.onclick();
+    assert.deepEqual([startedAt, level], [3, 3], 'the challenge level is set before starting');
+    assert.equal(challenge.score, 48200);
+    judgeChart(e); assert.equal(challenge.same, true);
+
+    song = demoSong(); reset(); mode = 'play'; run.score = 48000; shown = 48000;
+    for (const score of [48000, 48201]) { run.score = shown = score; draw(1, true); }
+    reset(); mode = 'over'; run.score = 49440; drawResults();
+    reset(); mode = 'over'; run.score = 47000; drawResults();
+    judgeChart({ meta: { ...meta, v: 8 } }); assert.equal(challenge.same, false);
+    reset(); mode = 'over'; run.score = 47000; drawResults();
+    reset(); mode = 'over'; run.score = 48200; drawResults();
+    reset(); assert.equal(challenge.score, 48200, 'the challenge survives a retry');
+
+    // Plain over screen for an Audius track offers sharing; a failed one does not.
+    challenge = null; menu.selected = menu.entries.indexOf(e);
+    reset(); mode = 'over'; drawResults();
+    reset(); mode = 'failed'; drawResults();
+    challenge = { score: 1, level: 0, chart: 'aaaaaaaa' }; mode = 'over'; setTimeout = () => 0; clearTimeout = () => {}; toTitle(); assert.equal(challenge, null, 'the title clears the challenge');
+  })()`, context);
+  canvas.fillText = fillText;
+  const hud = texts.filter(([t]) => /^TARGET|^@/.test(t)).map(([t, c]) => t + (c ? ' ' + c : ''));
+  assert.ok(has('TARGET 048200', 'rgba(255,255,255,.55)') && has('TARGET 048200', '#3ddc97'), 'the HUD target turns green once passed: ' + hud.join(' | '));
+  assert.ok(has('CHALLENGE BEATEN BY 1,240'));
+  assert.ok(has('1,200 SHORT OF THE CHALLENGE'));
+  assert.ok(has('1,200 SHORT OF THE CHALLENGE · different chart'), 'a mismatched hash is flagged');
+  assert.ok(has('TIED THE CHALLENGE · different chart'));
+  assert.ok(has('share this score'), 'an Audius result offers sharing');
+}
+console.log('ok: challenge links round-trip, set the level, show on the HUD and results, flag a different chart, and clear on the title');
+
 const beforeSnapshots = snapshots;
 vm.runInContext("mode = 'title'; scene.renderScene(1, false)", context);
 assert.equal(snapshots - beforeSnapshots, 1, 'one frame snapshot, including nested menu text calls');

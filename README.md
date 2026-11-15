@@ -98,6 +98,8 @@ Select an imported Audius track and click **Share** (or press **C**) to copy a l
 
 The recipient opens the link and clicks **Download & play**. Lockstep resolves the track through Audius, downloads and separates it on their device, then starts playing. Already imported tracks play from their library. Closing the prompt during processing leaves the import running but cancels automatic playback. Unavailable tracks and tracks outside the 30-second–10-minute limit show an error.
 
+**Challenges.** If you have a personal best for the song at the selected difficulty, the link also carries that score, the difficulty and a short fingerprint of the chart. The recipient plays at your difficulty with `TARGET` on the HUD (green once passed), and the results say how far they beat it or fell short. After a run, press **C** on the results screen (or tap **Share**) to send the score you just set. Separation is not identical on every device, so when the fingerprint differs the results add `· different chart`. There is no server: the score is on the honour system, and anyone can edit a link to claim any number.
+
 Links use the current game's address, so share from a publicly reachable deployment, not localhost. No audio, stems or local filenames are uploaded. The recipient needs a browser capable of running separation; first use downloads the model.
 
 ## License

@@ -13,6 +13,8 @@ import { createSceneRenderer } from "./lib/scene-renderer.js";
 import { createSongMenu, createTrackDialog } from "./lib/song-menu.js";
 import {
   audiusURL,
+  challengeFrom,
+  chartHash,
   createAudiusClient,
   createTrackSearch,
 } from "./lib/audius.js";
@@ -525,6 +527,9 @@ const songKey = (e) => e.lib || e.slug || "demo";
 // Best score per song and difficulty: a per-player convenience, so localStorage (losing it costs nothing but bragging rights).
 /** @type {Record<string,{score:number,grade:string}>} */
 let best = {};
+/** A friend's score to beat, from a share link; `same` is whether our chart matches theirs.
+ * @type {(import("./lib/audius.js").Challenge & {same?: boolean}) | null} */
+let challenge = null;
 let playKey = "demo",
   newBest = false;
 try {
@@ -713,6 +718,12 @@ async function decodeSong(e) {
   );
   return s;
 }
+/** Whether our chart is the one the challenger played; separation is not bit-identical across devices.
+ * @param {SongEntry} e */
+function judgeChart(e) {
+  if (challenge)
+    challenge.same = !!e.meta && chartHash(e.meta) === challenge.chart;
+}
 async function start() {
   const e = menu.entries[menu.selected];
   if (!e || mode === "loading") return;
@@ -736,6 +747,7 @@ async function start() {
   playKey = songKey(e);
   try {
     song = await loadSong(e);
+    judgeChart(e);
     reset(menuImage);
   } catch (err) {
     loadErr = `could not load: ${err instanceof Error ? err.message : String(err)}`;
@@ -745,6 +757,7 @@ async function start() {
   }
 }
 function toTitle() {
+  challenge = null;
   inSync = false;
   entrance = null;
   stopStems();
@@ -1008,11 +1021,17 @@ function findKey(e) {
 /** @param {SongEntry|undefined} e */
 function shareLink(e) {
   const track = audiusURL(e?.url);
-  if (!track) return null;
+  if (!track || !e) return null;
   const u = new URL(location.href);
   u.search = "";
   u.hash = "";
   u.searchParams.set("audius", track);
+  const b = best[`${songKey(e)}:${level}`];
+  if (b && e.meta) {
+    u.searchParams.set("score", String(b.score));
+    u.searchParams.set("level", String(level));
+    u.searchParams.set("chart", chartHash(e.meta));
+  }
   return u.href;
 }
 /** @param {string} title @param {string} message */
@@ -1052,8 +1071,8 @@ function queueAudius(t, done, failed) {
 }
 /** @param {string} value */
 const resolveSharedTrack = (value) => audius.resolve(value);
-/** @param {string} value */
-async function openSharedTrack(value) {
+/** @param {string} value @param {import("./lib/audius.js").Challenge | null} [from] a score to beat on this song */
+async function openSharedTrack(value, from = null) {
   const { d, status, close } = trackDialog(
     "Shared track",
     "Finding this track on Audius…",
@@ -1095,6 +1114,10 @@ async function openSharedTrack(value) {
         if (!d.open) return; // Closing leaves the import running, but cancels automatic playback.
         menu.selected = menu.entries.indexOf(entry);
         d.close();
+        if (from) {
+          challenge = { ...from };
+          setLevel(from.level);
+        }
         if (!document.hidden) await start();
         else {
           showSelected();
@@ -1114,8 +1137,12 @@ async function openSharedTrack(value) {
   }
 }
 if (globalThis.location) {
-  const shared = new URL(location.href).searchParams.get("audius");
-  if (shared) Promise.resolve().then(() => openSharedTrack(shared));
+  const params = new URL(location.href).searchParams,
+    shared = params.get("audius");
+  if (shared)
+    Promise.resolve().then(() =>
+      openSharedTrack(shared, challengeFrom(params, LEVELS.length)),
+    );
 }
 // The audio clock stays in the app; synthesis and graph ownership stay in the engine.
 function initAudio() {
@@ -1484,6 +1511,8 @@ function updateTouchControls() {
     document.getElementById("touch-default")
   ).disabled = mode !== "title";
   requiredElement("touch-calibrate").hidden = calibrationOffer() === null;
+  requiredElement("touch-share-result").hidden =
+    mode !== "over" || !audiusURL(menu.entries[menu.selected]?.url);
   requiredElement("touch-offset").textContent =
     `Audio offset: ${Math.round(offset * 1000)} ms`;
   /** @type {HTMLButtonElement} */ (
@@ -2793,6 +2822,25 @@ function drawResults() {
     newBest ? "#3ddc97" : "#a6b6c8",
     "right",
   );
+  if (challenge) {
+    const diff = run.score - challenge.score;
+    text(
+      `${
+        diff > 0
+          ? `CHALLENGE BEATEN BY ${diff.toLocaleString()}`
+          : diff < 0
+            ? `${(-diff).toLocaleString()} SHORT OF THE CHALLENGE`
+            : "TIED THE CHALLENGE"
+      }${challenge.same ? "" : " · different chart"}`,
+      48,
+      350,
+      `800 13px ${MONO}`,
+      diff > 0 ? "#3ddc97" : "#a6b6c8",
+      "left",
+    );
+  }
+  if (mode === "over" && audiusURL(menu.entries[menu.selected]?.url))
+    shortcut("C", "share this score", 620, 352);
   const offer = calibrationOffer();
   if (offer !== null) {
     const ms = Math.round((offer - offset) * 1000);
@@ -2899,6 +2947,7 @@ const scene = createSceneRenderer(
     bonus: encoreOpen(run, inSync),
     stemEnergy,
     intensity,
+    target: challenge ? challenge.score : -1,
     reactive,
     isCircuit,
     isLiquid,

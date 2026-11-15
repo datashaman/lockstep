@@ -19,6 +19,9 @@ assert.deepEqual(actionForKey("title", "T", true), {
   useAsDefault: true,
 });
 assert.deepEqual(actionForKey("over", "t"), { type: "autoCalibrate" });
+assert.deepEqual(actionForKey("over", "c"), { type: "share" });
+for (const screen of ["failed", "play", "pause"])
+  assert.equal(actionForKey(screen, "c"), null, "share a score only from the results screen");
 for (const screen of ["failed", "play", "pause"])
   assert.equal(actionForKey(screen, "t"), null);
 assert.deepEqual(actionForKey("pause", "]"), { type: "calibrate", delta: 1 });
