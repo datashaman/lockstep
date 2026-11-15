@@ -59,6 +59,8 @@ export interface SceneFrame {
   hue: number;
   idx: (beats: number[], time: number) => number;
   inSync: boolean;
+  /** The encore is open: the current track's AUTO notes can be played for a bonus. */
+  bonus: boolean;
   isCircuit: () => boolean;
   isLiquid: () => boolean;
   isPaper: () => boolean;

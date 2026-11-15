@@ -14,6 +14,12 @@ import {
   startHold,
   endHold,
   HOLD_SCORE,
+  encoreOpen,
+  recordEncoreHit,
+  recordEncore,
+  recordEncoreStray,
+  ENCORE_BARS,
+  ENCORE_BONUS,
 } from "./lib/gameplay.js";
 const run = createRunState();
 const tracks = createTracks(
@@ -65,6 +71,10 @@ assert.deepEqual(createRunState(), {
   groove: 100,
   missStreak: 0,
   currentTrack: 0,
+  bonusHits: 0,
+  encores: 0,
+  encoreTrack: -1,
+  encoreVoid: -1,
 });
 console.log(
   "ok: independent run state, capture score, miss failure, hit exclusion and silent-track switching",
@@ -141,4 +151,48 @@ console.log(
   assert.equal(c.notes[1].holding, true, "the last note is still held");
   assert.equal(recordCapture(r, c, 0, 1, 8), 100);
   console.log("ok: holds score by sixteenth, complete within a window of the tail, break early, and never block capture");
+}
+
+{
+  // Encores: while the band is IN SYNC the current track's AUTO notes can be played for a bonus.
+  const beats = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4];
+  const set = createTracks(
+    [
+      { name: "A", notes: [[0, 0], [0.5, 1]] },
+      { name: "B", notes: [[0, 2]] },
+    ],
+    ["red", "blue"],
+    3,
+    beats,
+    [0, 2, 4],
+  );
+  for (const t of set) [t.capFrom, t.capTo] = [0, 2];
+  const [a, b] = set;
+  const r = createRunState();
+  r.multiplier = 3;
+  const before = accuracy(r);
+  assert.equal(findHittableNote(a, 0, 0, 0.1, (t) => t), undefined, "AUTO notes are not hittable normally");
+  assert.equal(findHittableNote(a, 0, 0, 0.1, (t) => t, true), a.notes[0], "but are in an encore");
+  assert.equal(encoreOpen(r, false), false, "no encore without sync");
+  assert.equal(encoreOpen(r, true), true);
+
+  recordEncoreHit(r, a.notes[0], 0, 0.035);
+  assert.deepEqual([r.score, r.bonusHits, r.hits, a.hits, accuracy(r)], [90, 1, 0, 0, before], "2 x 15 x multiplier; accuracy untouched");
+  recordEncoreHit(r, a.notes[1], 0.05, 0.035);
+  assert.equal(r.score, 90 + 60, "a non-perfect hit is 2 x 10 x multiplier");
+
+  const bonus = recordEncore(r, set, 0, () => true);
+  assert.equal(bonus, ENCORE_BONUS * 3);
+  assert.deepEqual([a.capTo, b.capTo, r.encores, r.encoreTrack], [2 + ENCORE_BARS, 2 + ENCORE_BARS, 1, 0], "every locked track is extended");
+  assert.equal(encoreOpen(r, true), false, "the track that gave the encore must pass it on");
+  r.currentTrack = 1;
+  assert.equal(encoreOpen(r, true), true, "a second track can encore");
+  recordEncore(r, set, 1, (t) => t === a);
+  assert.deepEqual([a.capTo, b.capTo, r.encores, r.encoreTrack], [2 + 2 * ENCORE_BARS, 2 + ENCORE_BARS, 2, 1], "only locked tracks are extended");
+
+  r.multiplier = 4;
+  r.groove = 80;
+  recordEncoreStray(r, 3);
+  assert.deepEqual([r.multiplier, r.encoreVoid, r.groove, r.strays, r.misses], [1, 3, 80, 0, 0], "a stray voids the phrase and breaks the multiplier only");
+  console.log("ok: encore hits double-score outside accuracy, extend every locked track and pass between tracks");
 }

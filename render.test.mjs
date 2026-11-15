@@ -634,6 +634,42 @@ vm.runInContext(`{
 }
 console.log('ok: holds complete at the tail, break early, release on pause, track switch and blur, and draw behind the line');
 
+vm.runInContext(`{
+  // Encores: while IN SYNC, a clean pass over the current track's AUTO phrase extends every lock.
+  song = demoSong(); song.synth = true; ac = { currentTime: 0 }; reset(); t0 = 0; offset = 0;
+  audio.playCapture = () => {}; audio.playCountIn = () => {};
+  let played = 0; audio.playNote = () => { played++; };
+  const mk = t => ({ t, lane: 0, bar: bar(t), hit: false, missed: false, len: 0, holding: false, ended: false, broken: false });
+  const setup = () => {
+    reset(); mode = 'play'; played = 0;
+    tracks.forEach((tr, i) => { tr.notes = i === 0 ? [mk(0), { ...mk(.2), lane: 1 }] : []; tr.capFrom = 0; tr.capTo = 8; });
+    cur = 0; run.currentTrack = 0; run.multiplier = 2; run.groove = 90; updateSync(0);
+    assert.equal(inSync, true);
+  };
+  setup();
+  const before = { ...run };
+  tryHit(0, undefined, 0); tryHit(1, undefined, .2);
+  assert.deepEqual([run.bonusHits, run.hits, run.strays, run.encores], [2, 0, 0, 1]);
+  assert.equal(run.score - before.score, 2 * 15 * 2 * 2 + 100 * 2, 'two doubled hits plus the encore bonus at the multiplier');
+  assert.ok(tracks.every(tr => tr.capTo === 8 + ENCORE_BARS), 'every locked track gets two bars');
+  assert.equal(played, 0, 'the synth already sounds AUTO notes; the press adds no second voice');
+  assert.equal(accuracy(run), accuracy(before), 'accuracy is untouched');
+  assert.equal(encoreOpen(run, inSync), false, 'the same track cannot encore twice running');
+  const done = { ...run }; tracks[0].notes.push({ ...mk(.4), bar: 0 }); tryHit(0, undefined, .4);
+  assert.deepEqual({ ...run }, done, 'a locked track that already gave the encore ignores presses');
+  updateSync(BARLEN * 20); assert.equal(run.encoreTrack, -1, 'losing sync resets pass-it-on');
+
+  setup(); const base = { ...run };
+  tryHit(2, undefined, 0);
+  assert.deepEqual([run.multiplier, run.strays, run.misses, run.groove, run.encoreVoid], [1, 0, 0, 90, 0], 'a stray in sync only breaks the multiplier and voids the phrase');
+  tryHit(0, undefined, 0); tryHit(1, undefined, .2);
+  assert.deepEqual([run.encores, run.bonusHits, tracks[1].capTo], [0, 2, 8], 'a voided phrase gives no encore');
+  assert.equal(run.score - base.score, 2 * 15 * 1 * 2, 'but the notes still score');
+
+  setup(); const idle = JSON.stringify(run); logic(.5); updateSync(.5);
+  assert.equal(JSON.stringify(run), idle, 'an idle player in sync changes nothing');
+}`, context);
+console.log('ok: encores double-score outside accuracy, extend every lock, pass between tracks, and a stray voids the phrase');
 vm.runInContext(`
   Object.freeze(run);
   for (const track of tracks) {

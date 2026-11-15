@@ -26,6 +26,10 @@ import {
   recordCapture,
   recordMiss,
   recordStray,
+  encoreOpen,
+  recordEncoreHit,
+  recordEncore,
+  recordEncoreStray,
   startHold,
   endHold,
   accuracy,
@@ -1160,15 +1164,21 @@ function tryHit(lane, timeStamp, t = pressedSongTime(timeStamp) ?? now()) {
   press[lane] = rt;
   const tr = tracks[run.currentTrack];
   const window = LEVELS[level].win;
-  const n = findHittableNote(tr, lane, t, window, audioTime);
+  const bonus = encoreOpen(run, inSync);
+  const n = findHittableNote(tr, lane, t, window, audioTime, bonus);
   if (!n) {
     // A stray costs groove once the song has started, unless the track is locked or silent.
     if (t >= 0 && tr && playable(tr, t)) {
       changeGroove(recordStray(run, tr));
       missAt = rt;
+    } else if (t >= 0 && bonus) {
+      // In sync a stray press only spoils the encore: no groove, no stray count.
+      recordEncoreStray(run, Math.floor(bar(t) / 2));
+      missAt = rt;
     }
     return;
   }
+  if (auto(tr, n)) return encoreHit(tr, n, lane, t);
   const delta = audioTime(t) - audioTime(n.t);
   const { perfect, grooveGain } = recordHit(run, tr, n, delta, PERFECT);
   startHold(tr, n);
@@ -1199,6 +1209,34 @@ function tryHit(lane, timeStamp, t = pressedSongTime(timeStamp) ?? now()) {
     flash = { color: tr.color, born: rt };
     audio.playCapture(n.bar); // stay put: the arrows show where you can go next
   }
+}
+/** An encore note (an AUTO note played during sync): worth double, kept out of accuracy; a whole clean phrase extends every lock.
+ * @param {GameTrack} tr @param {GameNote} n @param {number} lane @param {number} t */
+function encoreHit(tr, n, lane, t) {
+  const { perfect } = recordEncoreHit(
+    run,
+    n,
+    audioTime(t) - audioTime(n.t),
+    PERFECT,
+  );
+  const x = trackX(run.currentTrack) + (lane - 1) * LW;
+  burst(x, HIT_Y, tr.color, perfect ? 18 : 9, 1);
+  laneHit[run.currentTrack * 3 + lane] = rt;
+  popup("ENCORE", x, HIT_Y - 46, "#fff", perfect ? 17 : 14, 0.45);
+  const p = Math.floor(n.bar / 2);
+  if (run.encoreVoid === p || !phraseNotes(tr, p).every((m) => m.hit)) return;
+  const cx = trackX(run.currentTrack);
+  const bonus = recordEncore(run, tracks, run.currentTrack, (k) =>
+    locked(k, t),
+  );
+  changeGroove(15);
+  popup("+2 BARS", cx, HIT_Y - 130, tr.color, 38, 1.1);
+  popup(`+${bonus}`, cx, HIT_Y - 90, "#fff", 20, 1.1);
+  burst(cx, HIT_Y, tr.color, 70, 1.8, TW);
+  rings.push({ x: cx, born: rt, color: tr.color });
+  shake = 12;
+  flash = { color: tr.color, born: rt };
+  audio.playCapture(n.bar);
 }
 /** A hold ends at song time t: its tail passed with the key down, or the key came up.
  * @param {GameTrack} tr @param {GameNote} n @param {number} t */
@@ -1631,6 +1669,7 @@ function updateSync(t) {
   const active = tracks.filter((tr) => tr.notes.length);
   const complete = active.length > 0 && active.every((tr) => locked(tr, t));
   if (complete && !inSync) syncAt = rt;
+  if (!complete) run.encoreTrack = -1; // a new sync starts a fresh pass-it-on
   inSync = complete;
 }
 /** @param {number} t */
@@ -2710,7 +2749,7 @@ function drawResults() {
     "right",
   );
   text(
-    `${run.captures} CAPTURES · ${run.strays} STRAYS`,
+    `${run.captures} CAPTURES · ${run.encores} ENCORES · ${run.strays} STRAYS`,
     752,
     264,
     `600 12px ${MONO}`,
@@ -2841,6 +2880,7 @@ const scene = createSceneRenderer(
     hue,
     idx,
     inSync,
+    bonus: encoreOpen(run, inSync),
     isCircuit,
     isLiquid,
     isPaper,
