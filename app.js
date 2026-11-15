@@ -1968,7 +1968,7 @@ function autoplayStep(t) {
   if (target !== current) move(target > current ? 1 : -1);
   // Hit on arrival, before this frame's judgement can count a note as missed.
   const tr = tracks[run.currentTrack];
-  if (!tr || locked(tr, t)) return;
+  if (!tr) return;
   for (let k = tr.judged; k < tr.notes.length && tr.notes[k].t <= t; k++) {
     const n = tr.notes[k];
     if (!n.hit && !n.missed && !auto(tr, n)) tryHit(n.lane, undefined, n.t);
