@@ -1213,6 +1213,11 @@ if (globalThis.location) {
 }
 // The audio clock stays in the app; synthesis and graph ownership stay in the engine.
 function initAudio() {
+  // iOS Safari mutes Web Audio while the ringer switch is on silent unless the page declares itself playback media.
+  const session = /** @type {{ audioSession?: { type: string } }} */ (
+    globalThis.navigator ?? {}
+  ).audioSession;
+  if (session) session.type = "playback";
   ac = new AudioContext();
   audio = createAudioEngine(ac, {
     step: STEP,
