@@ -66,6 +66,8 @@ export interface SceneFrame {
   intensity: number;
   /** The song has per-beat energy and motion is allowed: scenery follows the stems. */
   reactive: boolean;
+  /** A friend's score to beat from a share link, or -1. */
+  target: number;
   isCircuit: () => boolean;
   isLiquid: () => boolean;
   isPaper: () => boolean;
