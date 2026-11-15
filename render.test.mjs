@@ -754,6 +754,23 @@ console.log('ok: mastery marks follow the level, CLEAN, wrong-typed records, run
 }
 console.log('ok: practice never fails or locks, loops by seeking, judges slowed presses in real milliseconds and saves nothing');
 
+vm.runInContext(`{
+  // The dense stress demo: a note on every sixteenth, holds that never overlap a later note in their lane, energy and sections.
+  const sparse = demoSong(false), dense = demoSong(true);
+  assert.equal(sparse.sections, undefined); assert.ok(sparse.tracks.every(t => !t.energy), 'the plain demo is unchanged');
+  assert.deepEqual([...dense.sections], [0, 8, 16, 24]);
+  dense.tracks.forEach((tr, i) => {
+    assert.equal(tr.notes.length, BARS * 16, 'one note per sixteenth');
+    assert.ok(tr.notes.every((n, k) => k === 0 || n[0] > tr.notes[k - 1][0]), 'in time order');
+    assert.equal(tr.energy.length, dense.beats.length);
+    assert.ok(tr.energy.every(e => Number.isInteger(e) && e >= 0 && e <= 15));
+    const end = [-1, -1, -1];
+    for (const [t, lane, len = 0] of tr.notes) { assert.ok(t >= end[lane] - 1e-9, tr.name + ' holds never overlap'); if (len) end[lane] = t + len; }
+  });
+  assert.ok(dense.tracks[1].notes.some(n => n[2]) && dense.tracks[3].notes.some(n => n[2]) && !dense.tracks[0].notes.some(n => n[2]), 'bass and lead hold');
+  assert.ok(dense.tracks[0].notes.length > 2 * sparse.tracks[0].notes.length, 'much denser than the plain demo');
+}`, context);
+
 const beforeSnapshots = snapshots;
 vm.runInContext("mode = 'title'; scene.renderScene(1, false)", context);
 assert.equal(snapshots - beforeSnapshots, 1, 'one frame snapshot, including nested menu text calls');
