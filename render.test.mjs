@@ -810,6 +810,18 @@ vm.runInContext(`{
 }`, context);
 console.log('ok: autoplay goes either way, leaves an empty track, finishes a phrase, pre-positions for a lock expiring and does not ping-pong');
 
+vm.runInContext(`{
+  // A browser that draws slowly is given fewer pixels; a steady one keeps them, and one stall does not count.
+  DPR = 2; slowFrames = sampled = 0; mode = 'play';
+  for (let i = 0; i < 90; i++) adaptResolution(i === 0 ? 3 : 1 / 60); assert.equal(DPR, 2, 'smooth frames and a single stall keep the resolution');
+  for (let i = 0; i < 90; i++) adaptResolution(0.04); assert.equal(DPR, 1.5, 'slow frames step the ratio down');
+  assert.equal(cv.width, W * 1.5);
+  for (let i = 0; i < 90; i++) adaptResolution(0.04); assert.equal(DPR, 1);
+  for (let i = 0; i < 180; i++) adaptResolution(0.04); assert.equal(DPR, 1, 'and no lower than 1');
+  DPR = 1;
+}`, context);
+console.log('ok: resolution steps down for slow frames only');
+
 const beforeSnapshots = snapshots;
 vm.runInContext("mode = 'title'; scene.renderScene(1, false)", context);
 assert.equal(snapshots - beforeSnapshots, 1, 'one frame snapshot, including nested menu text calls');
