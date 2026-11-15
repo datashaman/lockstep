@@ -3247,7 +3247,7 @@ applyTheme(menu.entries[menu.selected]);
 requestAnimationFrame(frame);
 // Self-check: every phrase of every demo chart has notes, no step is doubled, and the grid maps times to bars.
 ["drums", "bass", "arp", "lead"].forEach((k, i) => {
-  const ns = chart(k, 7 + i * 101);
+  const ns = chart(k, 7 + i * 101, false);
   for (let p = 0; p < BARS / 2; p++)
     console.assert(
       ns.some(([t]) => Math.floor(t / BARLEN / 2) === p),
@@ -3296,7 +3296,7 @@ console.assert(
     "easy thinning",
     e,
   );
-  for (const tr of demoSong().tracks)
+  for (const tr of demoSong(false).tracks)
     console.assert(
       thin(tr.notes, 1).length === tr.notes.length,
       "normal keeps the demo",
