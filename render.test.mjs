@@ -771,6 +771,45 @@ vm.runInContext(`{
   assert.ok(dense.tracks[0].notes.length > 2 * sparse.tracks[0].notes.length, 'much denser than the plain demo');
 }`, context);
 
+vm.runInContext(`{
+  // ?autoplay picks the track with the soonest notes, in either direction, and gets there early.
+  song = demoSong(); song.synth = false; ac = { currentTime: 0 }; reset(); mode = 'play'; t0 = 0; offset = 0;
+  audio.playCapture = () => {}; audio.playSwitch = () => {};
+  const mk = t => ({ t, lane: 0, bar: bar(t), hit: false, missed: false, len: 0, holding: false, ended: false, broken: false });
+  const setup = (spec, at, lock = []) => {
+    reset(); mode = 'play'; t0 = 0;
+    tracks.forEach((tr, i) => { tr.notes = (spec[i] || []).map(mk); tr.judged = 0; tr.holds = []; tr.capFrom = lock[i] ? 0 : 0; tr.capTo = lock[i] || 0; });
+    run.currentTrack = at;
+  };
+  const steps = (t, n = 6) => { for (let i = 0; i < n; i++) autoplayStep(t); return run.currentTrack; };
+
+  // Right to left as well as left to right.
+  setup([[20], [20], [20], [2, 2.5, 3]], 0); assert.equal(steps(0), 3, 'goes right to the track with notes first');
+  setup([[2, 3], [20], [20], [20]], 3); assert.equal(steps(0), 0, 'and left');
+  setup([[14], [3, 4], [20], [20]], 2); assert.equal(steps(0), 1, 'the soonest track, not the next one along');
+
+  // A track with nothing to play for a while is left rather than waited on.
+  setup([[14], [3, 3.5], [20], [20]], 0); assert.equal(steps(0.1), 1, 'does not sit on an empty track until a note arrives');
+  // ...but a note within the bar keeps it where it is, and so does a phrase in progress.
+  setup([[1.5], [0.5], [20], [20]], 0); assert.equal(steps(0.1), 0);
+  setup([[0.5, 3.5], [1.5], [20], [20]], 0); tracks[0].notes[0].hit = true; assert.equal(steps(1), 0, 'a half-played phrase is not abandoned');
+
+  // Positions itself before a track's lock expires: track 1 frees up at bar 4 (8 s), long before the others.
+  setup([[3, 16.5], [3, 8.5, 9], [3, 17], [3, 17]], 2, [8, 4, 8, 8]);
+  tracks.forEach(tr => { tr.notes[0].hit = true; });
+  assert.equal(steps(1), 1, 'moves to the track that will be playable next while it is still locked');
+  assert.ok(locked(tracks[1], 1), 'before its notes are due');
+
+  // Interleaved dense tracks: stays put and plays its phrase, no ping-pong.
+  const dense = (off) => Array.from({ length: 15 }, (_, k) => k * .25 + off);
+  setup([dense(0), dense(.125), [30], [30]], 0);
+  let switches = 0, last = run.currentTrack;
+  for (let t = 0; t < 3.3; t += 1 / 60) { ac.currentTime = t; autoplayStep(t); if (run.currentTrack !== last) { switches++; last = run.currentTrack; } }
+  assert.equal(switches, 0, 'no switching while its own notes keep arriving');
+  assert.ok(tracks[0].notes.every(n => n.hit || n.t > 3.3), 'and it hit them');
+}`, context);
+console.log('ok: autoplay goes either way, leaves an empty track, finishes a phrase, pre-positions for a lock expiring and does not ping-pong');
+
 const beforeSnapshots = snapshots;
 vm.runInContext("mode = 'title'; scene.renderScene(1, false)", context);
 assert.equal(snapshots - beforeSnapshots, 1, 'one frame snapshot, including nested menu text calls');

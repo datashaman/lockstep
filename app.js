@@ -1925,24 +1925,47 @@ function logic(t) {
     else saveBest();
   }
 }
-/** ?autoplay: hit each note as it arrives, and leave a locked track for the
- * nearest playable one, preferring the right on a tie.
+/** Song time of this track's next note the player has to play (not yet hit or missed, and not AUTO), or Infinity.
+ * @param {GameTrack} tr */
+function nextPlayable(tr) {
+  for (let k = tr.judged; k < tr.notes.length; k++) {
+    const n = tr.notes[k];
+    if (!n.hit && !n.missed && !auto(tr, n)) return n.t;
+  }
+  return Infinity;
+}
+/** A phrase of this track that has been started but not finished: leaving it would lose its capture.
+ * @param {GameTrack} tr */
+function phraseInProgress(tr) {
+  for (let k = tr.judged; k < tr.notes.length; k++) {
+    const n = tr.notes[k];
+    if (n.hit || n.missed || auto(tr, n)) continue;
+    const phrase = phraseNotes(tr, Math.floor(n.bar / 2));
+    return phrase.some((m) => m.hit) && !phrase.every((m) => m.hit);
+  }
+  return false;
+}
+/** ?autoplay: hit each note as it arrives, and keep to the track that has something to play soonest. Moves early, so
+ * the craft is in place before the notes arrive, in whichever direction that is. It leaves the current track only
+ * when that track has nothing to play for a bar and is not part-way through a phrase.
  * @param {number} t */
 function autoplayStep(t) {
-  const current = run.currentTrack;
-  if (tracks[current] && locked(tracks[current], t))
-    for (let d = 1; d < tracks.length; d++) {
-      const right = tracks[current + d],
-        left = tracks[current - d];
-      if (right && playable(right, t)) {
-        move(1);
-        break;
-      }
-      if (left && playable(left, t)) {
-        move(-1);
-        break;
-      }
+  const current = run.currentTrack,
+    here = tracks[current];
+  let target = current;
+  if (here && !phraseInProgress(here)) {
+    const stay = nextPlayable(here),
+      span =
+        bars[Math.max(0, bar(t)) + 1] - bars[Math.max(0, bar(t))] || BARLEN;
+    if (stay - t > span) {
+      let soonest = stay;
+      tracks.forEach((tr, i) => {
+        const at = tr.notes.length ? nextPlayable(tr) : Infinity;
+        if (at < soonest) [soonest, target] = [at, i];
+      });
     }
+  }
+  if (target !== current) move(target > current ? 1 : -1);
   // Hit on arrival, before this frame's judgement can count a note as missed.
   const tr = tracks[run.currentTrack];
   if (!tr || locked(tr, t)) return;
