@@ -29,6 +29,11 @@ vm.runInContext(`
   initAudio(); const baselineEdges = countEdges();
   song = { ...demoSong(), synth: false, buffers: [{}, {}, {}, {}] };
   for (let i = 0; i < 20; i++) reset();
+  // Practice seeks restart the stems each time; the graph must not grow.
+  practice = true; reset(); seek(bars[4]); const afterOneSeek = countEdges();
+  for (let i = 0; i < 20; i++) seek(bars[4]);
+  assert.equal(countEdges(), afterOneSeek, 'twenty seeks leave the same audio graph as one');
+  practice = false;
   stopStems();
   console.log('extra audio graph connections after 20 plays:', countEdges() - baselineEdges);
   if (!globalThis.baselineOnly) assert.equal(countEdges(), baselineEdges, 'stopped stem graphs must be disconnected');

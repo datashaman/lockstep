@@ -38,6 +38,9 @@ The first song you add downloads the ~180 MB separation model once.
 | F | find a song on Audius: type to search, ↑ ↓ previews, Enter adds, Esc back | |
 | X twice (or Delete / Backspace) | delete a song | |
 | C | share the selected Audius track | |
+| P | practice the selected song | |
+| `-` `=` | | practice: slower / faster, 100% down to 50% in steps of 10% |
+| B | | practice: mark the loop start, then the end (the current phrase), then clear |
 | `[` `]` | audio offset, 10 ms per press | audio offset, 10 ms per press |
 | ? (or /) | all controls | |
 | J K L | | hit lanes |
@@ -46,6 +49,8 @@ The first song you add downloads the ~180 MB separation model once.
 On the results screen, Enter / Space retries and Esc returns to song selection. If your hits ran consistently early or late (20 or more hits, 15 ms or more on average), the results screen offers **T** to apply that correction to the audio offset, once per run.
 
 Choose a song’s look with **T** or the theme button on its sleeve: **Neon**, **Liquid Dream**, **Paper City** or **Circuit Cathedral**. **Shift+T** (or the default control beneath the sleeve) makes the current look the default for songs without a saved choice. Theme choices stay in this browser and do not change charts or timing.
+
+**Practice** (**P** on the title screen, or the Practice button) plays the selected song with no failure: groove stays at 100, a missed note costs nothing, and phrases never lock, so a fully hit phrase shows PHRASE CLEAR and the track stays playable. **-** and **=** set the speed from 100% to 50%; recorded stems drop in pitch as they slow, like a tape, and hit windows stay in real milliseconds. **B** marks the start of the current phrase, **B** again marks the end of the current phrase and starts looping it (the music restarts one bar before the loop, so that bar is your count-in), and a third **B** clears the loop. The progress bar shows the loop and the HUD shows `PRACTICE · 80%`. Nothing is saved: the results are labelled PRACTICE and personal bests are untouched. On touch, Slower, Faster and Loop buttons appear on the play screen during practice.
 
 Space or Esc pauses the song. Resume with Space/Enter and a three-second count-in, restart with R, or return to song selection with Esc. Switching tabs pauses automatically.
 

@@ -313,6 +313,15 @@ let pauseState = null;
 let visualOffset = 0;
 let failedAt = 0;
 let tempo = [{ at: 0, pos: 0, rate: 1 }];
+// Practice: no failure, slower, phrases looped on request, nothing saved. `practiceNext` carries the title's choice into start().
+let practice = false,
+  practiceNext = false,
+  practiceRate = 1;
+/** The looped phrase range in song seconds; `to` is null while only the start has been marked.
+ * @type {{from: number, to: number | null} | null} */
+let loop = null;
+const SEEK_LEAD = 0.15,
+  RATES = [0.5, 1];
 /** @type {import("./lib/scene").Particle[]} */
 let parts = [];
 /** @type {import("./lib/scene").Popup[]} */
@@ -423,6 +432,7 @@ function setTempo(rate) {
 }
 /** @param {number} amount */
 function changeGroove(amount) {
+  if (practice) return; // groove stays at 100: no drain, no slowdown, no failure
   const rate = applyGroove(run, amount);
   if (!run.groove) {
     failedAt = now();
@@ -498,13 +508,70 @@ function reset(menuImage = null) {
   entrance = menuImage ? { image: menuImage, at: rt } : null;
   if (menuImage && reducedMotion?.matches)
     camX = camTo = trackX(run.currentTrack);
-  tempo = [{ at: 0, pos: 0, rate: 1 }];
+  const rate = practice ? practiceRate : 1;
+  startTransport(0, LEAD_IN / rate, rate);
+}
+/** Start the transport at song position `from`, `lead` seconds from now, at `rate`; the stems follow it.
+ * @param {number} from @param {number} lead @param {number} rate */
+function startTransport(from, lead, rate) {
+  tempo = [{ at: 0, pos: from, rate }];
   audio?.stopSounds();
   audio?.restoreVolume();
-  t0 = ac.currentTime + LEAD_IN;
-  sched = -LEAD_IN;
+  t0 = ac.currentTime + lead;
+  sched = from - lead * rate;
   stopStems();
-  if (song.buffers) stemPlayer.start(song.buffers, t0);
+  if (song.buffers) stemPlayer.start(song.buffers, t0, { offset: from, rate });
+}
+/** Practice: restart one bar before `position`, so the bar before it serves as the count-in, with every note from there
+ * on playable again.
+ * @param {number} position */
+function seek(position) {
+  const b = Math.max(0, bar(position)),
+    from = b > 0 ? bars[b - 1] : position - (bars[1] - bars[0]);
+  startTransport(from, SEEK_LEAD, practiceRate);
+  for (const tr of tracks) {
+    tr.holds = [];
+    tr.judged = noteIndex(tr.notes, from);
+    for (let k = tr.judged; k < tr.notes.length; k++)
+      Object.assign(tr.notes[k], {
+        hit: false,
+        missed: false,
+        holding: false,
+        ended: false,
+        broken: false,
+      });
+  }
+}
+/** The start of the phrase (two bars) holding song time t, and its end.
+ * @param {number} t */
+const phraseSpan = (t) => {
+  const p = Math.max(0, bar(t)) >> 1;
+  return { from: bars[p * 2], to: bars[p * 2 + 2] ?? song.duration };
+};
+/** B: mark the loop start, then the end (and loop), then clear.
+ * @param {number} t */
+function toggleLoop(t) {
+  const span = phraseSpan(t);
+  if (loop?.to != null) loop = null;
+  else if (!loop) loop = { from: span.from, to: null };
+  else if (span.to > loop.from) loop = { from: loop.from, to: span.to };
+  else loop = { from: span.from, to: null }; // the end came before the start: mark a new start
+  popup(
+    loop ? (loop.to === null ? "LOOP START" : "LOOP") : "LOOP OFF",
+    W / 2,
+    300,
+    "#c9a8ff",
+    22,
+    0.9,
+  );
+}
+/** @param {number} delta */
+function stepRate(delta) {
+  practiceRate = Math.max(
+    RATES[0],
+    Math.min(RATES[1], Math.round((practiceRate + delta * 0.1) * 10) / 10),
+  );
+  setTempo(practiceRate);
 }
 // ---------- song sources: built-in demo · your library (separated in this browser, kept in IndexedDB) · songs/ (prep.py) ----------
 const DEMO = { title: "Demo (synth)" },
@@ -718,7 +785,9 @@ function judgeChart(e) {
     challenge.same = !!e.meta && chartHash(e.meta) === challenge.chart;
 }
 async function start() {
-  const e = menu.entries[menu.selected];
+  const e = menu.entries[menu.selected],
+    wantPractice = practiceNext;
+  practiceNext = false;
   if (!e || mode === "loading") return;
   if (e.add) return picker.click();
   clearTimeout(pvTimer);
@@ -740,6 +809,9 @@ async function start() {
   playKey = songKey(e);
   try {
     song = await loadSong(e);
+    practice = wantPractice;
+    practiceRate = 1;
+    loop = null;
     judgeChart(e);
     reset(menuImage);
   } catch (err) {
@@ -751,6 +823,8 @@ async function start() {
 }
 function toTitle() {
   challenge = null;
+  practice = practiceNext = false;
+  loop = null;
   inSync = false;
   entrance = null;
   stopStems();
@@ -1230,7 +1304,13 @@ function tryHit(lane, timeStamp, t = pressedSongTime(timeStamp) ?? now()) {
     0.45,
   );
   const p = Math.floor(n.bar / 2);
-  if (phraseNotes(tr, p).every((m) => m.hit)) {
+  if (practice && phraseNotes(tr, p).every((m) => m.hit)) {
+    // Phrases never lock in practice: the track stays playable, so a passage can be played straight through.
+    const cx = trackX(run.currentTrack);
+    popup("PHRASE CLEAR", cx, HIT_Y - 130, tr.color, 30, 1.1);
+    burst(cx, HIT_Y, tr.color, 40, 1.4, TW);
+    audio.playCapture(n.bar);
+  } else if (phraseNotes(tr, p).every((m) => m.hit)) {
     const cx = trackX(run.currentTrack);
     const bonus = recordCapture(run, tr, p, rt, CAPTURE_BARS);
     changeGroove(15);
@@ -1332,6 +1412,16 @@ function dispatchAction(action) {
       break;
     case "start":
       start();
+      break;
+    case "practice":
+      practiceNext = true;
+      start();
+      break;
+    case "speed":
+      if (practice && mode === "play") stepRate(action.delta);
+      break;
+    case "loop":
+      if (practice && mode === "play") toggleLoop(now());
       break;
     case "theme":
       chooseTheme(action.useAsDefault);
@@ -1504,6 +1594,10 @@ function updateTouchControls() {
     document.getElementById("touch-default")
   ).disabled = mode !== "title";
   requiredElement("touch-calibrate").hidden = calibrationOffer() === null;
+  for (const button of /** @type {NodeListOf<HTMLElement>} */ (
+    touchDock.querySelectorAll("[data-practice]")
+  ))
+    button.hidden = !practice;
   requiredElement("touch-share-result").hidden =
     mode !== "over" || !audiusURL(menu.entries[menu.selected]?.url);
   requiredElement("touch-offset").textContent =
@@ -1709,6 +1803,7 @@ function updateSync(t) {
 }
 /** @param {number} t */
 function logic(t) {
+  if (practice && loop?.to != null && t >= loop.to) return seek(loop.from);
   const end = song.duration,
     upto = songTime(ac.currentTime - t0 + 0.1);
   for (const bt of beats) {
@@ -1778,7 +1873,7 @@ function logic(t) {
   if (t > end + 1) {
     mode = "over";
     overAt = rt;
-    if (AUTOPLAY) newBest = false;
+    if (AUTOPLAY || practice) newBest = false;
     else saveBest();
   }
 }
@@ -2786,7 +2881,7 @@ function drawResults() {
   g.fillStyle = "rgba(3,2,6,.94)";
   g.fillRect(0, 0, W, H);
   text(
-    `SESSION COMPLETE / ${LEVELS[level].name}`,
+    `${practice ? "PRACTICE" : "SESSION COMPLETE"} / ${LEVELS[level].name}`,
     48,
     50,
     `700 11px ${MONO}`,
@@ -2855,8 +2950,8 @@ function drawResults() {
     "right",
   );
   text(
-    AUTOPLAY
-      ? "AUTOPLAY · BEST NOT SAVED"
+    AUTOPLAY || practice
+      ? `${practice ? "PRACTICE" : "AUTOPLAY"} · BEST NOT SAVED`
       : newBest
         ? "NEW PERSONAL BEST"
         : `BEST  ${record ? record.score.toLocaleString() : "—"}`,
@@ -2992,6 +3087,8 @@ const scene = createSceneRenderer(
     stemEnergy,
     intensity,
     target: challenge ? challenge.score : -1,
+    practice: practice ? practiceRate : 0,
+    loop,
     reactive,
     isCircuit,
     isLiquid,

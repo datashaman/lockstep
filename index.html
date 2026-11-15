@@ -21,6 +21,7 @@
             <option value="1">Normal</option>
             <option value="2">Hard</option>
             <option value="3">Expert</option></select
+          ><button data-key="p">Practice</button
           ><button data-key="Enter" class="primary">Play</button>
         </div>
         <div class="touch-row">
@@ -58,7 +59,10 @@
           Middle</button
         ><button class="hit" data-pad="l" aria-label="Hit right lane">
           Right</button
-        ><button data-pad=" " aria-label="Pause">Pause</button>
+        ><button data-pad=" " aria-label="Pause">Pause</button
+        ><button data-practice data-key="-" hidden>Slower</button
+        ><button data-practice data-key="=" hidden>Faster</button
+        ><button data-practice data-key="b" hidden>Loop</button>
       </div>
       <div data-screen="pause">
         <div class="touch-row">

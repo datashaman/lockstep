@@ -113,3 +113,13 @@ vm.runInContext(`
   offer(30, .028, .49); assert.equal(calibrationOffer(), .5, 'clamped at the limit'); offset = .5; assert.equal(calibrationOffer(), null, 'nothing left to apply at the limit');
   offer(30, .028); mode = 'failed'; assert.equal(calibrationOffer(), null, 'failed screen never offers');
 `, context);
+
+{
+  // Practice controls: a title button, and Slower, Faster and Loop on the play screen, hidden until practice.
+  const { readFileSync } = await import('node:fs');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  assert.match(html, /<button data-key="p">Practice<\/button/);
+  for (const [key, label] of [['-', 'Slower'], ['=', 'Faster'], ['b', 'Loop']])
+    assert.match(html, new RegExp(`<button data-practice data-key="${key}" hidden>${label}</button`), label);
+  console.log('ok: practice buttons exist and stay hidden outside practice');
+}
