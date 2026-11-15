@@ -59,6 +59,8 @@ Hits outside the perfect window show how many milliseconds early or late they we
 
 You can move onto captured (AUTO) tracks and back out again; silent tracks are skipped.
 
+**Encore.** While every track is captured (IN SYNC), the AUTO notes of the track you are on light up and can be played. Hitting them scores double and stays out of the grade; playing a whole two-bar phrase without a stray press earns **ENCORE**: a bonus and two more bars on every captured track. The track that just gave an encore sits the next one out, so move to another track to keep the sync going. A press that hits nothing during an encore breaks the multiplier and spoils that phrase, but costs no groove. If you do nothing, sync runs out as before.
+
 The title screen also works with the mouse: click a song to select it and again to play, or click the buttons.
 Four difficulties thin the same stored chart at play time: **EASY** (about one note per beat), **NORMAL** (eighth notes), **HARD** (one note per eighth, including off-beat sixteenths where the eighth itself is empty) and **EXPERT** (every sixteenth). Your best grade and score for each song and difficulty are kept in this browser.
 
