@@ -70,6 +70,10 @@ const BPM = 120,
   BARLEN = 16 * STEP,
   BARS = 32,
   CAPTURE_BARS = 8,
+  // ?dense swaps the demo for a stress chart: a note on every sixteenth, holds, energy and sections.
+  DENSE = globalThis.location
+    ? new URL(location.href).searchParams.has("dense")
+    : false,
   PERFECT = 0.035,
   LEAD_IN = 3;
 // Difficulty thins the stored chart at play time (no re-separation). win = hit window in seconds.
@@ -199,41 +203,80 @@ const PICK = {
   lead: (s, r) => (s % 2 === 0 && r() < 0.35 ? Math.floor(r() * 3) : -1),
 };
 // One 2-bar phrase per 8-bar section, repeated 4x, so the player can learn it.
+/** Dense variant of PICK: every sixteenth plays. Bass and lead hold one note per half bar, on a lane no other note
+ * of theirs uses meanwhile, so holds never overlap a later note in their lane.
+ * @param {string} kind @param {number} s @param {()=>number} r */
+function densePick(kind, s, r) {
+  const m = s % 8,
+    held = kind === "bass" ? 0 : 2;
+  if ((kind === "bass" && m === 0) || (kind === "lead" && m === 4))
+    return [held, 6 * STEP];
+  const other = Math.floor(r() * 2);
+  return [
+    kind === "bass" || kind === "lead"
+      ? other >= held
+        ? other + 1
+        : other
+      : Math.floor(r() * 3),
+    0,
+  ];
+}
 /** @returns {import('./lib/song').Note[]}
- * @param {string} kind @param {number} seed */
-function chart(kind, seed) {
+ * @param {string} kind @param {number} seed @param {boolean} [dense] */
+function chart(kind, seed, dense = DENSE) {
   const r = rng(seed);
   /** @type {import('./lib/song').Note[]} */
   const notes = [];
   for (let sec = 0; sec < BARS / 8; sec++) {
+    /** @type {[number, number, number?][]} */
     const phrase = [];
     for (let s = 0; s < 32; s++) {
+      if (dense) {
+        const [lane, len] = densePick(kind, s, r);
+        phrase.push(len ? [s, lane, len] : [s, lane]);
+        continue;
+      }
       const lane = PICK[kind](s, r);
       if (lane >= 0) phrase.push([s, lane]);
     }
     if (!phrase.length) phrase.push([0, 0]);
     for (let rep = 0; rep < 4; rep++)
-      for (const [s, lane] of phrase) {
-        notes.push([((sec * 8 + rep * 2) * 16 + s) * STEP, lane]);
+      for (const [s, lane, len] of phrase) {
+        const t = ((sec * 8 + rep * 2) * 16 + s) * STEP;
+        notes.push(len ? [t, lane, len] : [t, lane]);
       }
   }
   return notes;
 }
 // A song: { title, duration, beats: [s], downbeat: index of first bar's beat, tracks: [{ name, notes: [[t, lane]] }] }
 // plus either synth: true (built-in demo, notes make sounds) or buffers: [AudioBuffer per track] (real stems).
-/** @returns {import('./lib/song').PlayableSong} */
-const demoSong = () => ({
-  title: "Demo (synth)",
+/** @returns {import('./lib/song').PlayableSong}
+ * @param {boolean} [dense] */
+const demoSong = (dense = DENSE) => ({
+  title: dense ? "Demo (dense)" : "Demo (synth)",
   synth: true,
   duration: BARS * BARLEN,
   downbeat: 0,
   beats: Array.from({ length: BARS * 4 + 1 }, (_, k) => k * BEAT),
+  ...(dense ? { sections: [0, 8, 16, 24] } : {}),
   tracks: [
     ["DRUMS", "drums"],
     ["BASS", "bass"],
     ["ARP", "arp"],
     ["LEAD", "lead"],
-  ].map(([name, kind], i) => ({ name, kind, notes: chart(kind, 7 + i * 101) })),
+  ].map(([name, kind], i) => ({
+    name,
+    kind,
+    notes: chart(kind, 7 + i * 101, dense),
+    // swells and falls per section so the scenery has something to follow
+    ...(dense
+      ? {
+          energy: Array.from({ length: BARS * 4 + 1 }, (_, k) =>
+            Math.round(8 + 7 * Math.sin(k / 5 + i * 1.7 + (k >> 5))),
+          ),
+        }
+      : {}),
+  })),
 });
 // ---------- state ----------
 /** @type {AudioContext} */

@@ -218,3 +218,31 @@ const report = JSON.parse(lines.find((line) => line.startsWith('{')));
 assert.ok(report.frames > 3900 && report.autoplay && report.dropped === 0 && report.longTasks === 0, JSON.stringify(report));
 vm.runInContext('drawResults()', auto);
 console.log(`ok: flags off by default; autoplay finished the demo with ${result.hits} hits, ${result.captures} captures, no misses; perf reported ${report.frames} frames`);
+
+
+// ?dense swaps the demo for a stress chart; autoplay must still clear it with nothing missed.
+{
+  const dense = vm.createContext({ ...appImports, assert, AudioContext, URL, PerformanceObserver, Float32Array,
+    console: { ...console, log() {} },
+    location: { href: 'https://game.example/lockstep/?perf&autoplay&dense' },
+    performance: { now: () => clock * 1000 },
+    localStorage: {},
+    document: { getElementById: () => ({ getContext: () => g, addEventListener() {} }) },
+    addEventListener() {}, requestAnimationFrame() {}, fetch: () => Promise.reject(new Error('offline')),
+    setTimeout() {}, clearTimeout() {},
+  });
+  vm.runInContext(appSource, dense);
+  const r = vm.runInContext(`
+    assert.equal(DENSE, true);
+    initAudio(); song = demoSong(); setLevel(3); reset();
+    const notes = tracks.map(tr => tr.notes.length), holds = tracks.map(tr => tr.notes.filter(n => n.len > 0).length);
+    let frames = 0;
+    while (mode === 'play' && frames < 10000) { frames++; ac.currentTime += 1 / 60; globalThis.tick(); frame(); }
+    ({ mode, hits: run.hits, misses: run.misses, notes, holds, title: song.title, frames });
+  `, Object.assign(dense, { tick: () => (clock += 1 / 60) }));
+  assert.equal(r.mode, 'over'); assert.equal(r.misses, 0, 'autoplay clears the dense chart');
+  assert.equal(r.title, 'Demo (dense)');
+  assert.ok(r.notes.every(n => n === 512), `a note on every sixteenth: ${r.notes}`);
+  assert.equal(JSON.stringify(r.holds.map(h => h > 0)), '[false,true,false,true]', 'bass and lead hold');
+  console.log(`ok: ?dense autoplay cleared ${r.notes.join('+')} notes (${r.holds.join('+')} holds) with no misses in ${r.frames} frames`);
+}
