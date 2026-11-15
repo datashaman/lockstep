@@ -145,3 +145,39 @@ const distinct = p => new Set(p).size;
 assert(distinct(withoutStep) > 1, 'detuning makes repeats differ without the step');
 assert(distinct(withStep) < distinct(withoutStep), `repeats converge: ${withoutStep.join(' ')} -> ${withStep.join(' ')}`);
 console.log(`ok: repeats share lanes, a reversed contour and a different rhythm keep their own; detuned riff ${distinct(withoutStep)} -> ${distinct(withStep)} distinct patterns`);
+
+// Energy map and sections: three blocks (drums alone 8 bars, all four stems 16, bass and vocals alone at half level 8).
+{
+  const BAR = 4 * SPB, bars = 32, n = Math.ceil((OFFSET + bars * BAR + 1) * SR), mk = () => new Float32Array(n);
+  const tone = (y, t0, dur, m, amp) => { for (let i = Math.round(t0 * SR); i < Math.min(n, Math.round((t0 + dur) * SR)); i++) { const x = i / SR - t0; y[i] += amp * Math.sin(2 * Math.PI * hz(m) * x) * Math.min(1, x * 80, (dur - x) * 15); } };
+  const d = mk(), b = mk(), v = mk(), o = mk();
+  for (let k = 0; k < bars; k++) {
+    const t = OFFSET + k * BAR, full = k >= 8 && k < 24, tail = k >= 24;
+    for (let q = 0; q < 4; q++) {
+      const at = t + q * SPB, amp = tail ? .15 : .3;
+      if (k < 24) {
+        if (q === 0) add(d, at, x => x < .25 ? Math.sin(2 * Math.PI * (50 * x + 3 * (1 - Math.exp(-x * 30)))) * Math.exp(-x * 12) : 0);
+        if (q === 2) add(d, at, x => x < .15 ? noise() * .5 * Math.exp(-x * 25) : 0);
+        for (const h of [0, .5]) add(d, at + h * SPB, x => x < .04 ? noise() * .15 * Math.exp(-x * 90) : 0);
+      }
+      if (full || tail) { tone(b, at, SPB * .95, [33, 40, 36, 43][q], amp); tone(v, at, SPB * .95, [69, 72, 76, 74][q], amp); }
+      if (full) tone(o, at, SPB * .95, [57, 60, 64][q % 3], .25);
+    }
+  }
+  const blocks = analyze({ drums: st(d), bass: st(b), vocals: st(v), other: st(o) });
+  assert.deepEqual(blocks.sections, [0, 8, 24], `sections ${blocks.sections}`);
+  const [, , vocal] = blocks.tracks, first = blocks.beats.findIndex(t => t >= OFFSET - .05), at = bar => first + bar * 4;
+  assert(vocal.energy.slice(0, at(8) - 1).every(e => e === 0), 'vocals are silent in the first block');
+  assert(vocal.energy.slice(at(8) + 1, at(24) - 1).every(e => e >= 10), `vocals are loud in the second block: ${vocal.energy.slice(at(8), at(8) + 8)}`);
+  console.log(`ok: sections ${blocks.sections}; vocal energy 0 in the first block, >= 10 throughout the second`);
+}
+// Every chart: one integer 0-15 per beat per track, and a bleed-only stem reads zero.
+for (const chart of [song, forced, sixteenths, held]) {
+  for (const track of chart.tracks) assert(track.energy.length === chart.beats.length && track.energy.every(e => Number.isInteger(e) && e >= 0 && e <= 15), `${track.name} energy shape`);
+  assert(chart.sections[0] === 0 && chart.sections.every((s, i) => s % 2 === 0 && (i === 0 || s > chart.sections[i - 1])), `sections ${chart.sections}`);
+}
+assert(song.tracks[3].energy.every(e => e === 0), 'the bleed-only stem has all-zero energy');
+// A 10-minute, 120 BPM chart at the loudest possible stays under 16 KB for energy and sections.
+const worstCase = JSON.stringify({ energy: Array.from({ length: 4 }, () => Array(1200).fill(15)), sections: Array.from({ length: 75 }, (_, i) => i * 8) });
+assert(worstCase.length < 16 * 1024, `energy and sections take ${worstCase.length} bytes`);
+console.log(`ok: energy arrays are one 0-15 integer per beat; the worst-case 10-minute chart adds ${worstCase.length} bytes`);

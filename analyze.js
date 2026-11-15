@@ -13,7 +13,7 @@ const SR = 22050,
 // A centred 93 ms window makes onset-strength peaks lead the real attack; measured on synthetic stems (analyze.test.mjs).
 const LEAD = 0.034,
   HALF_WINDOW = NFFT / 2 / SR; // seconds from a frame's centre to its edge
-export const CHART_V = 6; // bump when charting changes: stored songs are re-charted from their saved stems
+export const CHART_V = 7; // bump when charting changes: stored songs are re-charted from their saved stems
 /** @type {[string,string,[number,number] | null][]} */
 export const STEMS = [
   ["drums", "DRUMS", null],
@@ -508,6 +508,84 @@ function holdLengths(rms, picks, g16, L) {
   });
 }
 
+// Loudness of a stem on every beat, for scenery that follows the music at the cost of an array lookup: the mean of its
+// rms over the beat, relative to its own 95th percentile, as an integer 0-15. A stem that is more than 20 dB under the
+// whole mix on a beat (bleed, silence) reads 0, as it does for note charting.
+/** @param {Float32Array} rms @param {Float32Array} mixRms @param {number[]} beats */
+export function beatEnergy(rms, mixRms, beats) {
+  const top = pct(rms, 95),
+    mean = (/** @type {Float32Array} */ r, /** @type {number} */ k) => {
+      const from = Math.min(r.length - 1, Math.round(beats[k] * FPS)),
+        to = Math.max(
+          from + 1,
+          Math.min(
+            r.length,
+            k + 1 < beats.length ? Math.round(beats[k + 1] * FPS) : r.length,
+          ),
+        );
+      let sum = 0;
+      for (let f = from; f < to; f++) sum += r[f];
+      return sum / (to - from);
+    };
+  return beats.map((_, k) => {
+    const here = mean(rms, k);
+    if (!top || here < AUDIBLE * mean(mixRms, k)) return 0;
+    return Math.round(15 * Math.min(1, here / top));
+  });
+}
+
+// Section starts: per bar, each stem's mean energy; at each even bar from 4 on, novelty is how far the next 4 bars'
+// mean sits from the previous 4's. A start is a local novelty maximum above mean + 1 standard deviation, at least 8 bars
+// after the previous one. Bar indices count from the downbeat.
+/** @param {number[][]} energy per stem, per beat @param {number} down beat index of bar 0 */
+export function findSections(energy, down) {
+  const count = Math.floor((energy[0].length - down) / 4),
+    bar = Array.from({ length: count }, (_, k) =>
+      energy.map(
+        (e) =>
+          (e[down + 4 * k] +
+            e[down + 4 * k + 1] +
+            e[down + 4 * k + 2] +
+            e[down + 4 * k + 3]) /
+          4,
+      ),
+    ),
+    mean = (/** @type {number} */ from) =>
+      energy.map(
+        (_, s) =>
+          (bar[from][s] +
+            bar[from + 1][s] +
+            bar[from + 2][s] +
+            bar[from + 3][s]) /
+          4,
+      ),
+    /** @type {number[]} */
+    novelty = [];
+  for (let b = 4; b + 4 <= count; b += 2) {
+    const before = mean(b - 4),
+      after = mean(b);
+    novelty[b] = Math.hypot(...after.map((v, s) => v - before[s]));
+  }
+  const values = novelty.filter((v) => v !== undefined);
+  if (!values.length) return [0];
+  const avg = values.reduce((a, b) => a + b, 0) / values.length,
+    sd = Math.sqrt(
+      values.reduce((a, v) => a + (v - avg) ** 2, 0) / values.length,
+    ),
+    sections = [0];
+  for (let b = 4; b < novelty.length; b += 2) {
+    const v = novelty[b];
+    if (
+      v > avg + sd &&
+      (novelty[b - 2] === undefined || v >= novelty[b - 2]) &&
+      (novelty[b + 2] === undefined || v > novelty[b + 2]) &&
+      b - sections[sections.length - 1] >= 8
+    )
+      sections.push(b);
+  }
+  return sections;
+}
+
 /** @param {Record<string,{left:Float32Array,right:Float32Array}>} stems
  * @param {{density?:number,bpm?:number,onProgress?:(progress:number)=>void,repeatPhrases?:boolean}} [options]
  * @returns {import("./lib/song").SongChart} */
@@ -581,6 +659,7 @@ export function analyze(
       density,
       repeatPhrases,
     ),
+    energy: beatEnergy(ft[s].rms, mixFt.rms, beats),
   }));
   onProgress(1);
   return {
@@ -589,6 +668,10 @@ export function analyze(
     beats: beats.map((b) => Math.round(b * 1e4) / 1e4),
     downbeat: down,
     tracks,
+    sections: findSections(
+      tracks.map((t) => t.energy),
+      down,
+    ),
     bpm:
       Math.round(600 / median(beats.slice(1).map((b, i) => b - beats[i]))) / 10,
     grid: kind,

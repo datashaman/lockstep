@@ -5,6 +5,8 @@ export interface ChartTrack {
   name: string;
   stem: string;
   notes: Note[];
+  /** Loudness of the stem on each beat of `beats`, 0 (silent) to 15 (its loud end). */
+  energy?: number[];
 }
 export interface SongChart {
   v?: number;
@@ -14,6 +16,8 @@ export interface SongChart {
   bpm?: number;
   /** Whether beats are one steady tempo or follow a drifting one. */
   grid?: "steady" | "tracked";
+  /** Ascending bar indices (always even, starting at 0) where a section of the song starts. */
+  sections?: number[];
   tracks: ChartTrack[];
 }
 /** Stored in chart-track order; each pair contains left and right 44.1 kHz PCM. */
@@ -39,7 +43,14 @@ export interface PlayableSong {
   downbeat: number;
   synth?: boolean;
   buffers?: AudioBuffer[];
-  tracks: { name: string; kind?: string; stem?: string; notes: Note[] }[];
+  sections?: number[];
+  tracks: {
+    name: string;
+    kind?: string;
+    stem?: string;
+    notes: Note[];
+    energy?: number[];
+  }[];
 }
 export interface SongEntry {
   title: string;
