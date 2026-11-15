@@ -3,6 +3,7 @@
 // Input: stems as { drums, bass, vocals, other } -> { left, right } Float32Array at 44.1 kHz.
 // Output: the same song shape prep.py writes ({ duration, beats, downbeat, tracks: [{ name, notes: [[t, lane]] }] }).
 import { fft } from "./vendor/demucs-web/fft.js";
+import { beatIndex, median } from "./lib/beat-grid.js";
 
 const SR = 22050,
   NFFT = 2048,
@@ -11,7 +12,7 @@ const SR = 22050,
   NB = NFFT / 2 + 1;
 // A centred 93 ms window makes onset-strength peaks lead the real attack; measured on synthetic stems (analyze.test.mjs).
 const LEAD = 0.034;
-export const CHART_V = 2; // bump when charting changes: stored songs are re-charted from their saved stems
+export const CHART_V = 3; // bump when charting changes: stored songs are re-charted from their saved stems
 /** @type {[string,string,[number,number] | null][]} */
 export const STEMS = [
   ["drums", "DRUMS", null],
@@ -168,7 +169,7 @@ const at = (env, t) => {
 
 // Steady-tempo grid: autocorrelation picks the tempo (log-normal prior around 120 BPM, like librosa),
 // then a fine search over period and phase maximises onset strength on the beats.
-// ponytail: assumes one steady tempo; songs that drift or change tempo need a dynamic-programming beat tracker.
+// Fits one period and one phase to the whole song; trackBeats below handles songs that drift.
 /** @param {Float32Array} env @param {number} duration */
 export function grid(env, duration, forcedBpm = 0) {
   let mean = 0;
@@ -215,14 +216,102 @@ export function grid(env, duration, forcedBpm = 0) {
   return beats;
 }
 
-// Shift the grid onto the drum stem's attacks: median offset of drum onsets from the nearest 16th.
+// Dynamic-programming beat tracker (Ellis 2007, the method behind librosa.beat.beat_track): a beat scores its onset
+// strength plus the best earlier beat, less a penalty for straying from `period`, so the grid follows a drifting tempo.
+// ponytail: one global period prior; an abrupt tempo change beyond about ±10% needs per-section period estimates.
+const TIGHTNESS = 100;
+/** @param {Float32Array} env @param {number} period seconds per beat, from the steady fit */
+export function trackBeats(env, period) {
+  const n = env.length,
+    P = period * FPS;
+  let sum = 0,
+    sq = 0;
+  for (const v of env) {
+    sum += v;
+    sq += v * v;
+  }
+  const sd = Math.sqrt(Math.max(0, sq / n - (sum / n) ** 2)) || 1,
+    half = Math.ceil(P / 8),
+    win = new Float32Array(2 * half + 1),
+    local = new Float32Array(n);
+  for (let k = -half; k <= half; k++)
+    win[k + half] = Math.exp(-0.5 * ((k * 32) / P) ** 2);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    for (let k = Math.max(-half, -i); k <= half && i + k < n; k++)
+      s += env[i + k] * win[k + half];
+    local[i] = s / sd;
+  }
+  const lo = Math.round(P / 2),
+    hi = Math.round(2 * P),
+    penalty = new Float32Array(hi + 1),
+    cum = new Float32Array(n),
+    back = new Int32Array(n).fill(-1);
+  for (let d = lo; d <= hi; d++) penalty[d] = -TIGHTNESS * Math.log(d / P) ** 2;
+  for (let i = 0; i < n; i++) {
+    let top = -Infinity;
+    for (let d = lo; d <= hi && d <= i; d++) {
+      const score = cum[i - d] + penalty[d];
+      if (score > top) {
+        top = score;
+        back[i] = i - d;
+      }
+    }
+    cum[i] = local[i] + (back[i] >= 0 ? top : 0);
+  }
+  let last = n - 1;
+  for (let i = Math.max(0, n - Math.round(P)); i < n; i++)
+    if (cum[i] > cum[last]) last = i;
+  /** @type {number[]} */
+  const frames = [];
+  for (let i = last; i >= 0; i = back[i]) frames.push(i);
+  // sub-frame time of the nearest envelope peak, then a local least-squares line over ±4 beats smooths the jitter
+  const raw = frames.reverse().map((f) => {
+    let m = f;
+    for (let i = Math.max(0, f - 2); i <= Math.min(n - 1, f + 2); i++)
+      if (env[i] > env[m]) m = i;
+    return peakTime(env, m);
+  });
+  return raw.map((_, k) => {
+    const a = Math.max(0, k - 4),
+      b = Math.min(raw.length - 1, k + 4),
+      c = b - a + 1;
+    let sx = 0,
+      sy = 0,
+      sxx = 0,
+      sxy = 0;
+    for (let j = a; j <= b; j++) {
+      sx += j;
+      sy += raw[j];
+      sxx += j * j;
+      sxy += j * raw[j];
+    }
+    const den = c * sxx - sx * sx;
+    return den ? (sy + ((k * c - sx) * (c * sxy - sx * sy)) / den) / c : raw[k];
+  });
+}
+
+/** Tracked beats are kept only when the song really drifts: 95% of them within 25 ms of a steady beat means steady.
+ * @param {number[]} tracked @param {number[]} steady */
+function drifts(tracked, steady) {
+  const period = median(steady.slice(1).map((b, i) => b - steady[i]));
+  const near = tracked.filter((b) => {
+    const k = Math.round((b - steady[0]) / period),
+      s = steady[Math.min(steady.length - 1, Math.max(0, k))];
+    return Math.abs(b - s) <= 0.025;
+  });
+  return near.length / tracked.length < 0.95;
+}
+
+// Shift the grid onto the drum stem's attacks: median offset of drum onsets from the nearest 16th of their own beat.
 /** @param {number[]} beats @param {Float32Array} drumEnv */
 function align(beats, drumEnv) {
-  const p16 = (beats[1] - beats[0]) / 4,
-    res = [];
+  const res = [];
   for (const n of peaks(drumEnv)) {
     const t = peakTime(drumEnv, n) + LEAD,
-      r = ((((t - beats[0]) % p16) + p16 * 1.5) % p16) - p16 / 2;
+      k = Math.min(Math.max(beatIndex(beats, t), 0), beats.length - 2),
+      p16 = (beats[k + 1] - beats[k]) / 4,
+      r = ((((t - beats[k]) % p16) + p16 * 1.5) % p16) - p16 / 2;
     if (Math.abs(r) < p16 / 2) res.push(r);
   }
   const shift = res.length ? pct(res, 50) : 0;
@@ -371,7 +460,20 @@ export function analyze(
   for (const [s] of STEMS)
     for (let i = 0; i < mix.length; i++) mix[i] += ys[s][i];
   const mixFt = features(mix),
-    beats = align(grid(mixFt.env, duration, bpm), ft.drums.env);
+    steady = grid(mixFt.env, duration, bpm);
+  let found = steady,
+    kind = /** @type {"steady" | "tracked"} */ ("steady");
+  if (!bpm && steady.length > 8) {
+    const tracked = trackBeats(
+      mixFt.env,
+      median(steady.slice(1).map((b, i) => b - steady[i])),
+    );
+    if (tracked.length > 8 && drifts(tracked, steady)) {
+      found = tracked;
+      kind = "tracked";
+    }
+  }
+  const beats = align(found, ft.drums.env);
   onProgress(5 / 6);
   // downbeat = the bar phase (0-3) whose beats carry the most kick energy; flux peaks lead the beat like onsets do
   const lf = ft.drums.lowFlux,
@@ -405,6 +507,8 @@ export function analyze(
     beats: beats.map((b) => Math.round(b * 1e4) / 1e4),
     downbeat: down,
     tracks,
-    bpm: Math.round(600 / (beats[1] - beats[0])) / 10,
+    bpm:
+      Math.round(600 / median(beats.slice(1).map((b, i) => b - beats[i]))) / 10,
+    grid: kind,
   };
 }

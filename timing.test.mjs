@@ -21,4 +21,13 @@ const notes = [[0,0],[.125,1],[.25,2],[.5,0],[.75,1],[1,2]];
 assert.equal(thinChart(notes, 2, originalBeats), notes);
 assert.deepEqual(thinChart(notes, 1, originalBeats), [[0,0],[.25,2],[.5,0],[.75,1],[1,2]]);
 assert.deepEqual(thinChart(notes, 0, originalBeats), [[0,0],[.5,0],[1,2]]);
+const accelerating = [0];
+for (let i = 0; i < 24; i++) accelerating.push(accelerating[i] + .5 - .1 * i / 23);
+const accelerated = accelerating.slice();
+const longer = extendBeatGrid({ beats: accelerating, downbeat: 0, duration: accelerating.at(-1) }, 3, 4);
+const opening = .5 - .1 * 3.5 / 23, closing = .5 - .1 * 19.5 / 23; // medians of the first and last 8 intervals
+assert.ok(longer.downbeat > 0);
+for (let i = 0; i < longer.downbeat; i++) assert.ok(Math.abs(longer.beats[i + 1] - longer.beats[i] - opening) < 1e-9, 'lead-in beats use the opening interval');
+for (let i = accelerating.length - 1 + longer.downbeat; i < longer.beats.length - 1; i++) assert.ok(Math.abs(longer.beats[i + 1] - longer.beats[i] - closing) < 1e-9, 'tail beats use the closing interval');
+assert.deepEqual(accelerating, accelerated, 'extending an accelerating grid does not mutate it');
 console.log('ok: tempo round trips, slow/recovered clock, non-mutating grid extension, beat slots and difficulty rules');

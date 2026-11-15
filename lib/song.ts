@@ -11,6 +11,8 @@ export interface SongChart {
   beats: number[];
   downbeat: number;
   bpm?: number;
+  /** Whether beats are one steady tempo or follow a drifting one. */
+  grid?: "steady" | "tracked";
   tracks: ChartTrack[];
 }
 /** Stored in chart-track order; each pair contains left and right 44.1 kHz PCM. */
