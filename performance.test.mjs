@@ -132,7 +132,7 @@ const measured = vm.runInContext(`
   level = 3; // EXPERT keeps every note, the worst case
   song = { ...demoSong(), synth: false, duration: 600,
     beats: Array.from({ length: 1201 }, (_, i) => i * .5),
-    tracks: Array.from({ length: 4 }, (_, i) => ({ name: 'TRACK ' + i, notes: Array.from({ length: 4800 }, (_, j) => [j * .125, j % 3]) })) };
+    tracks: Array.from({ length: 4 }, (_, i) => ({ name: 'TRACK ' + i, notes: Array.from({ length: 4800 }, (_, j) => (j % 8 === 0 ? [j * .125, j % 3, .75] : [j * .125, j % 3])) })) }; // every eighth note starts a 6-sixteenth hold
   reset(); t0 = 0;
   const worst = {};
   for (const key of Object.keys(THEMES)) {

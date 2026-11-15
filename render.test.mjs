@@ -18,13 +18,13 @@ for (const name of ['createLinearGradient', 'createRadialGradient']) canvas[name
 };
 canvas.measureText = text => ({ width: text.length * 7 });
 const motion = { matches: false };
-const events = {};
+const events = {}, windowEvents = {};
 const context = vm.createContext({ ...appImports,
   createSceneRenderer: (g, readFrame, document) => appImports.createSceneRenderer(g, () => { snapshots++; return readFrame(); }, document),
   console: { ...console, assert: (value, ...message) => assert.ok(value, message.join(' ')) },
   document: { addEventListener: (name, fn) => events[name] = fn, getElementById: () => ({ getContext: () => canvas, addEventListener() {} }) },
   performance: { now: () => 0 }, matchMedia: () => motion,
-  addEventListener() {}, requestAnimationFrame() {},
+  addEventListener: (name, fn) => (windowEvents[name] ??= []).push(fn), requestAnimationFrame() {},
   fetch: () => Promise.reject(new Error('offline test')),
   assert, URL,
 });
@@ -586,6 +586,54 @@ const beforeSnapshots = snapshots;
 vm.runInContext("mode = 'title'; scene.renderScene(1, false)", context);
 assert.equal(snapshots - beforeSnapshots, 1, 'one frame snapshot, including nested menu text calls');
 // Drawing cannot mutate scoring, captures or note judgement.
+context.document.createElement = () => ({ width: 0, height: 0, getContext: () => canvas });
+context.windowEvents = windowEvents;
+// Hold notes: held to the tail, released early, released by pause, track switch and blur, missed heads and drawing.
+vm.runInContext(`{
+  ac = { currentTime: 0, state: 'running', suspend: async () => { ac.state = 'suspended'; }, resume: async () => { ac.state = 'running'; } };
+  song = demoSong(); song.synth = false; level = 3; reset(); t0 = 0; offset = 0; rt = 400; visualOffset = 0;
+  audio.playSwitch = () => {}; audio.playCountIn = () => {};
+  const mk = (t, lane, len = 0) => ({ t, lane, bar: 0, hit: false, missed: false, len, holding: false, ended: false, broken: false });
+  const sixteenths = (a, b) => (fractionalBeat(beats, b) - fractionalBeat(beats, a)) * 4;
+  const hold = (hit = true) => {
+    pauseState = null; mode = 'play'; ac.currentTime = 0; groove = 100;
+    for (const tr of tracks) { tr.notes = []; tr.holds = []; tr.judged = 0; tr.live = true; }
+    tracks[0].notes = [mk(0, 0, 1)]; tracks[0].maxHold = 1; tracks[1].notes = [mk(5, 0)];
+    cur = 0; score = 0; mult = 1;
+    if (hit) tryHit(0);
+    return tracks[0].notes[0];
+  };
+  let n = hold(); const head = score;
+  assert.deepEqual([n.holding, tracks[0].holds.length], [true, 1]);
+  ac.currentTime = 1.05; logic(now());
+  assert.deepEqual([n.holding, n.ended, n.broken], [false, true, false], 'a hold completes when the song reaches its tail');
+  assert.equal(score - head, HOLD_SCORE * mult * Math.round(sixteenths(0, 1)), 'scored at the multiplier the head earned');
+
+  n = hold(); const before = score; ac.currentTime = .5; dispatchAction({ type: 'release', lane: 0 });
+  assert.deepEqual([n.holding, n.broken, tracks[0].live], [false, true, false], 'early release breaks the hold and cues the stem');
+  assert.equal(score - before, HOLD_SCORE * mult * Math.floor(sixteenths(0, .5)));
+  n = hold(); dispatchAction({ type: 'release', lane: 1 }); assert.equal(n.holding, true, 'another lane leaves it held');
+
+  n = hold(); ac.currentTime = .3; pauseGame(); assert.equal(mode, 'pause');
+  assert.deepEqual([n.holding, n.broken], [false, true], 'pause releases held notes');
+  n = hold(); ac.currentTime = .3; move(1); assert.deepEqual([n.holding, n.broken], [false, true], 'switching track releases held notes');
+  n = hold(); ac.currentTime = .3; windowEvents.blur.forEach(fn => fn()); assert.deepEqual([n.holding, n.broken], [false, true], 'window blur releases held notes');
+
+  n = hold(false); ac.currentTime = .5; logic(now()); const misses = run.misses; tryHit(0);
+  assert.deepEqual([n.missed, n.holding, misses], [true, false, 1], 'a missed head is a miss and its tail cannot be picked up');
+  assert.equal(tracks[0].holds.length, 0);
+}`, context);
+{
+  const bodyCalls = (maxHold, time) => vm.runInContext(`
+    pauseState = null; mode = 'play'; tracks[0].notes = [{ t: 0, lane: 1, bar: 0, hit: true, missed: false, len: 4, holding: true, ended: false, broken: false }];
+    tracks[0].maxHold = ${maxHold}; tracks[1].notes = []; cur = 0; ac.currentTime = ${time}; run.currentTrack = 0;
+    calls = []; draw(${time}, true); 0`, context) ?? 0;
+  const count = (maxHold, time) => { calls.length = 0; bodyCalls(maxHold, time); return calls.length; };
+  assert.ok(count(4, 2) > count(0, 2), 'a held note whose head passed 2 s ago still draws its body');
+  assert.equal(count(4, 5), count(0, 5), 'nothing is drawn once the tail has passed');
+}
+console.log('ok: holds complete at the tail, break early, release on pause, track switch and blur, and draw behind the line');
+
 vm.runInContext(`
   Object.freeze(run);
   for (const track of tracks) {
@@ -595,3 +643,4 @@ vm.runInContext(`
   scene.renderScene(1, true);
 `, context);
 console.log('ok: renderer accepts frozen gameplay state');
+

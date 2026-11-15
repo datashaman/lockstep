@@ -34,6 +34,7 @@ const pads = ['j', 'k', 'l', 'ArrowLeft', 'ArrowRight', ' '].map(button);
 vm.runInContext(`
   const inputs = []; mode = 'play'; ac = { currentTime: 42 };
   const stamps = []; tryHit = (lane, timeStamp) => { inputs.push(['hit', lane, ac.currentTime]); stamps.push(timeStamp); };
+  const released = []; releaseHolds = lane => released.push(lane);
   move = dir => inputs.push(['move', dir]);
   pauseGame = () => { mode = 'pause'; inputs.push(['pause']); };
 `, context);
@@ -48,6 +49,8 @@ vm.runInContext('assert.equal(inputs.length, 3)', context);
 pads[0].events.pointercancel({ pointerId: 1 }); assert.equal(pads[0].classes.size, 0);
 pads[1].events.lostpointercapture({ pointerId: 2 }); pads[2].events.pointerup({ pointerId: 3 });
 vm.runInContext('assert.equal(touchPointers.size, 0)', context);
+pads[0].events.pointerup({ pointerId: 1 });
+vm.runInContext("assert.deepEqual(released, [0, 1, 2], 'cancel, lost capture and up each release their lane once; repeats do nothing')", context);
 pads[3].events.pointerdown(down(4)); pads[4].events.pointerdown(down(5));
 pads[0].events.click({ detail: 0 }); // native keyboard/assistive activation
 vm.runInContext("assert.deepEqual(inputs.slice(3), [['move',-1],['move',1],['hit',0,42]])", context);

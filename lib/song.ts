@@ -1,5 +1,6 @@
 /** Seconds on the song timeline and a lane index (left, middle, right). */
-export type Note = [time: number, lane: number];
+/** `length` (seconds on the song timeline) is present only on hold notes. */
+export type Note = [time: number, lane: number, length?: number];
 export interface ChartTrack {
   name: string;
   stem: string;
