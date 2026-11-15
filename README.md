@@ -59,6 +59,8 @@ Hits outside the perfect window show how many milliseconds early or late they we
 
 You can move onto captured (AUTO) tracks and back out again; silent tracks are skipped.
 
+The scenery follows the music when the chart has per-beat energy: each other lane's floor glow and rails breathe with its stem, the stars and road sway swell with the mix, and the colour changes when the song changes section instead of every bar. The synth demo and charts made before energy was stored keep the fixed look; reduced motion keeps the section colour and the fixed glow.
+
 **Encore.** While every track is captured (IN SYNC), the AUTO notes of the track you are on light up and can be played. Hitting them scores double and stays out of the grade; playing a whole two-bar phrase without a stray press earns **ENCORE**: a bonus and two more bars on every captured track. The track that just gave an encore sits the next one out, so move to another track to keep the sync going. A press that hits nothing during an encore breaks the multiplier and spoils that phrase, but costs no groove. If you do nothing, sync runs out as before.
 
 The title screen also works with the mouse: click a song to select it and again to play, or click the buttons.
