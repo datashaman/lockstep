@@ -11,8 +11,9 @@ const SR = 22050,
   FPS = SR / HOP,
   NB = NFFT / 2 + 1;
 // A centred 93 ms window makes onset-strength peaks lead the real attack; measured on synthetic stems (analyze.test.mjs).
-const LEAD = 0.034;
-export const CHART_V = 4; // bump when charting changes: stored songs are re-charted from their saved stems
+const LEAD = 0.034,
+  HALF_WINDOW = NFFT / 2 / SR; // seconds from a frame's centre to its edge
+export const CHART_V = 5; // bump when charting changes: stored songs are re-charted from their saved stems
 /** @type {[string,string,[number,number] | null][]} */
 export const STEMS = [
   ["drums", "DRUMS", null],
@@ -432,7 +433,40 @@ function chart(y, ft, mixRms, beats, bars, pitch, density) {
         for (const i of idx) lanes[i] = Number(m[i] > lo) + Number(m[i] > hi); // < 1 semitone of movement: all middle lane
     }
   }
-  return ts.map((t, i) => [Math.round(t * 1e4) / 1e4, lanes[i]]);
+  const lengths = pitch ? holdLengths(rms, picks, g16, L) : [];
+  return ts.map((t, i) => {
+    const note = /** @type {import("./lib/song").Note} */ ([
+      Math.round(t * 1e4) / 1e4,
+      lanes[i],
+    ]);
+    if (lengths[i]) note.push(Math.round(lengths[i] * 1e4) / 1e4);
+    return note;
+  });
+}
+
+// Sustained pitched notes become holds: follow the stem's loudness from each attack while it stays at or above half
+// its peak (dips of up to 3 frames allowed), end at most one sixteenth before the next note, snap down to the
+// sixteenth grid, and keep only holds of at least one beat. Shorter sustains stay taps.
+/** @param {Float32Array} rms @param {[number,number][]} picks @param {number[]} g16 @param {number} L
+ * @returns {number[]} hold length in seconds per pick, 0 for taps */
+function holdLengths(rms, picks, g16, L) {
+  return picks.map(([slot, n], i) => {
+    const start = Math.min(n + L + 4, rms.length - 1);
+    let peak = 0;
+    for (let f = n; f <= start; f++) peak = Math.max(peak, rms[f]);
+    let end = start,
+      dips = 0;
+    for (let f = start + 1; f < rms.length && dips <= 3; f++)
+      if (rms[f] >= peak / 2) {
+        end = f;
+        dips = 0;
+      } else dips++;
+    let last = slot; // last sixteenth slot at or before the end of the sound
+    while (last + 1 < g16.length && g16[last + 1] <= end / FPS + HALF_WINDOW)
+      last++; // the last frame at half peak is centred about half a window before the sound ends
+    if (i + 1 < picks.length) last = Math.min(last, picks[i + 1][0] - 1);
+    return last - slot >= 4 ? g16[last] - g16[slot] : 0;
+  });
 }
 
 /** @param {Record<string,{left:Float32Array,right:Float32Array}>} stems

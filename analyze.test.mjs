@@ -81,3 +81,24 @@ const offSlots = sixteenths.tracks[0].notes.filter(([t]) => beatSlot(sixteenths.
 assert(offSlots.length >= BARS * 4, `only ${offSlots.length} drum notes on off-sixteenth slots`);
 assert(offSlots.every(([t]) => off(t) < .005), 'off-sixteenth notes sit on the sixteenth grid');
 console.log(`ok: density 4 charts ${offSlots.length} off-sixteenth drum notes`);
+
+// Holds: a 2-beat sustained vocal followed by staccato notes. Only the sustain becomes a hold.
+const sung = stem();
+for (let bar = 0; bar < BARS; bar++) {
+  const t = OFFSET + bar * 4 * SPB;
+  add(sung, t, x => x < 2 * SPB ? Math.sin(2 * Math.PI * hz(69) * x) * .25 * Math.min(1, x * 80) * (x < 2 * SPB - .15 ? 1 : .5 * (1 + Math.cos(Math.PI * (x - 2 * SPB + .15) / .15))) : 0); // a natural 150 ms release, so the stop itself is not an onset
+  for (const [beat, m] of [[2.5, 72], [3.5, 76]])
+    add(sung, t + beat * SPB, x => x < .08 ? Math.sin(2 * Math.PI * hz(m) * x) * .25 * Math.min(1, x * 400) * Math.min(1, (.08 - x) * 50) : 0);
+}
+const held = analyze({ drums: st(drums), bass: st(bass), vocals: st(sung), other: st(other) });
+const sustained = held.tracks[2].notes.filter(n => n[2]), shortNotes = held.tracks[2].notes.filter(n => !n[2]);
+assert(sustained.length >= BARS - 2, `only ${sustained.length} of ${BARS} sustained notes became holds`);
+assert(sustained.every(n => Math.abs(n[2] - 2 * SPB) <= SPB / 4 + 1e-3), `hold lengths ${sustained.slice(0, 4).map(n => n[2])} vs ${2 * SPB}`);
+assert(shortNotes.length >= BARS, 'staccato notes stay taps');
+assert(shortNotes.every(([t]) => !sustained.some(([s, , len]) => t > s && t < s + len)), 'no tap inside a hold');
+for (const chart of [song, forced, sixteenths, held]) {
+  assert(chart.tracks[0].notes.every(n => n.length === 2), 'drum tracks contain no holds');
+  for (const track of chart.tracks)
+    track.notes.forEach(([t, , len], i, all) => { if (len) assert(t + len < all[i + 1]?.[0] ?? Infinity, `${track.name}: hold at ${t} overlaps the next note`); });
+}
+console.log(`ok: ${sustained.length} sustained vocal notes became holds of ${(sustained[0][2] / SPB).toFixed(2)} beats; staccato notes and drums stay taps`);

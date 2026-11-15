@@ -23,9 +23,9 @@ def compare():
     assert abs(offline['bpm'] - 100) < .5
     assert len(offline['tracks']) == 4
     for track in offline['tracks']:
-        times = [t for t, _ in track['notes']]
+        times = [note[0] for note in track['notes']]
         assert times == sorted(set(times))
-        assert all(0 <= t <= offline['duration'] and lane in (0, 1, 2) for t, lane in track['notes'])
+        assert all(0 <= note[0] <= offline['duration'] and note[1] in (0, 1, 2) for note in track['notes'])
     for density in (1, 4):
         forced = prep.chart_stems(stems, bpm=120, density=density)
         assert forced['bpm'] == 120
