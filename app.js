@@ -74,6 +74,7 @@ const BPM = 120,
   DENSE = globalThis.location
     ? new URL(location.href).searchParams.has("dense")
     : false,
+  SLOW_FRAME = 0.028,
   PERFECT = 0.035,
   LEAD_IN = 3;
 // Difficulty thins the stored chart at play time (no re-separation). win = hit window in seconds.
@@ -175,15 +176,11 @@ function context2D(canvas) {
 }
 const cv = /** @type {HTMLCanvasElement} */ (requiredElement("c")),
   g = context2D(cv),
-  // ?dpr=1 renders at that pixel ratio instead of the display's (capped at 2), to see whether resolution is what makes a browser slow.
-  DPR = Math.min(
-    2,
-    Number(
-      globalThis.location && new URL(location.href).searchParams.get("dpr"),
-    ) ||
-      globalThis.devicePixelRatio ||
-      1,
+  // ?dpr=1 renders at that pixel ratio instead of the display's (capped at 2) and turns off the automatic step-down below.
+  forcedDpr = Number(
+    globalThis.location && new URL(location.href).searchParams.get("dpr"),
   );
+let DPR = Math.min(2, forcedDpr || globalThis.devicePixelRatio || 1);
 cv.width = W * DPR;
 cv.height = H * DPR;
 const reducedMotion = globalThis.matchMedia?.(
@@ -2006,6 +2003,24 @@ function finishPerf() {
   );
   perfLine = `PERF ${s.frames} frames · ${Math.round(1000 / s.medianDelta)} fps · ${theme.name} · dpr ${DPR} · script p50 ${ms(s.p50)} p95 ${ms(s.p95)} p99 ${ms(s.p99)} ms · dropped ${(s.dropped * 100).toFixed(2)}% · long frames ${s.longFrames} · long tasks ${longTasks ?? "n/a"}`;
 }
+let slowFrames = 0,
+  sampled = 0;
+/** A browser that rasterises the canvas slowly (Firefox on a retina display, at about 40 ms a frame) is given fewer pixels:
+ * after 90 frames of which 60 ran slower than 28 ms the pixel ratio steps down (2, 1.5, 1). Frames are sampled in rolling
+ * windows, so one stall, such as a hidden tab, never counts as a slow run. Off with ?dpr=.
+ * @param {number} delta seconds since the previous frame */
+function adaptResolution(delta) {
+  if (forcedDpr || DPR <= 1 || delta <= 0 || mode === "loading") return;
+  sampled++;
+  if (delta > SLOW_FRAME) slowFrames++;
+  if (sampled < 90) return;
+  if (slowFrames >= 60) {
+    DPR = Math.max(1, DPR - 0.5);
+    cv.width = W * DPR;
+    cv.height = H * DPR;
+  }
+  slowFrames = sampled = 0;
+}
 function frame() {
   const started = performance.now();
   updateTouchControls();
@@ -2013,6 +2028,7 @@ function frame() {
     delta = wall - last,
     fdt = Math.min(0.05, delta);
   last = wall;
+  adaptResolution(delta);
   if (mode === "pause") {
     drawPause();
     requestAnimationFrame(frame);
