@@ -41,3 +41,33 @@ for (const options of [{ bpm: 0 }, { bpm: Infinity }, { bpm: 401 }, { density: 3
 const forced = analyze({ drums: st(drums), bass: st(bass), vocals: st(vocals), other: st(other) }, { bpm: 120, density: 1 });
 assert.equal(forced.bpm, 120);
 assert(forced.beats.slice(1).every((beat, i) => Math.abs(beat - forced.beats[i] - .5) < .00011));
+
+// Tempo-following grid: stems whose tempo drifts must chart on the music; steady stems keep the steady grid.
+assert.equal(song.grid, 'steady', 'steady 128 BPM stems keep the steady grid');
+const drift = (bpmAt, seconds) => {
+  const beats = [], n = Math.ceil((seconds + 1) * SR), d = stem(), b = stem();
+  let phase = 0, t = 0;
+  for (; t < seconds; t += .001) {
+    const before = phase; phase += bpmAt(t) / 60 * .001;
+    if (Math.floor(phase * 2) > Math.floor(before * 2)) {
+      const k = Math.floor(phase * 2), on = k % 2 === 0, at = t + .001 / 2;
+      if (on) { beats.push(at); if (k / 2 % 4 === 0) add(d, at, x => x < .25 ? Math.sin(2 * Math.PI * (50 * x + 3 * (1 - Math.exp(-x * 30)))) * Math.exp(-x * 12) : 0); if (k / 2 % 4 === 2) add(d, at, x => x < .15 ? noise() * .5 * Math.exp(-x * 25) : 0); add(b, at, x => x < .3 ? ((x * hz([33, 40, 36, 43][k / 2 % 4])) % 1 * 2 - 1) * .3 * Math.exp(-x * 3) : 0); }
+      else add(d, at, x => x < .04 ? noise() * .15 * Math.exp(-x * 90) : 0);
+    }
+  }
+  return { beats, stems: { drums: st(d), bass: st(b), vocals: st(stem()), other: st(stem()) } };
+};
+const worst = (chartBeats, trueBeats, skip = 8) => {
+  const errs = chartBeats.slice(skip).map(c => Math.min(...trueBeats.map(t => Math.abs(c - t))));
+  return { share: errs.filter(e => e <= .015).length / errs.length, max: Math.max(...errs) };
+};
+for (const [name, bpmAt] of [['sinusoidal drift', t => 120 * (1 + .03 * Math.sin(2 * Math.PI * t / 40))], ['linear ramp', t => 100 + 10 * Math.min(t, 60) / 60]]) {
+  const { beats: truth, stems } = drift(bpmAt, name === 'linear ramp' ? 60 : 90);
+  const tracked = analyze(stems);
+  assert.equal(tracked.grid, 'tracked', `${name} charts with the tracked grid`);
+  const { share, max } = worst(tracked.beats, truth);
+  assert(share >= .95, `${name}: ${(share * 100).toFixed(0)}% of beats within 15 ms (worst ${(max * 1000).toFixed(0)} ms)`);
+  const steadyMax = worst(analyze(stems, { bpm: Math.round(tracked.bpm) }).beats, truth).max;
+  assert(steadyMax > .06, `${name}: a steady grid strays only ${(steadyMax * 1000).toFixed(0)} ms, so this test would not bite`);
+  console.log(`ok: ${name} tracked, ${(share * 100).toFixed(0)}% within 15 ms, worst ${(max * 1000).toFixed(0)} ms vs steady ${(steadyMax * 1000).toFixed(0)} ms`);
+}
