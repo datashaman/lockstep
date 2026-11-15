@@ -79,9 +79,9 @@ def main():
         print(f'{track["name"]:8} {len(track["notes"]):4} notes')
 
     for tr in tracks:  # self-check
-        ts = [t for t, _ in tr['notes']]
+        ts = [n[0] for n in tr['notes']]
         assert ts == sorted(ts) and len(set(ts)) == len(ts) and all(0 <= t <= duration for t in ts), tr['name']
-        assert all(l in (0, 1, 2) for _, l in tr['notes']), tr['name']
+        assert all(n[1] in (0, 1, 2) for n in tr['notes']), tr['name']
     (out / 'song.json').write_text(json.dumps(song, separators=(',', ':')))
 
     idx_path = ROOT / 'songs' / 'index.json'

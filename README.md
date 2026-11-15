@@ -49,6 +49,8 @@ Choose a song’s look with **T** or the theme button on its sleeve: **Neon**, *
 
 Space or Esc pauses the song. Resume with Space/Enter and a three-second count-in, restart with R, or return to song selection with Esc. Switching tabs pauses automatically.
 
+Sustained bass, vocal and harmony notes are **holds**, drawn as a long bar behind the note. Hit the head on time and keep the key or finger down to the tail: each sixteenth held scores, and carrying it to the end restores a little groove. Letting go early ends the hold, scores only what you held, and drops that instrument to cue volume; releasing within a hit window of the tail still counts. Pausing, switching track or leaving the window lets go of every held note.
+
 Keep the **groove meter** alive: missed notes on your active track drain it, and consecutive misses drain more. Hits restore a little groove; captures restore more. AUTO and unselected tracks neither drain nor refill it. Stray presses, lane presses that hit no note once the song has started, break the multiplier, drop the track's stem to cue volume and drain a little groove; presses during the count-in or on an AUTO track are free. Strays also count against the grade, which is hits ÷ (hits + misses + strays). Below 40%, the song and highway slow down; recover to bring them back to tempo. At zero the run ends, with Retry and Song selection available. Failed runs do not save a personal best.
 
 Recorded songs slow with a tape-style pitch drop. The synth demo slows its beat and note scheduling. Both use the same chart clock, while hit windows and timing feedback remain measured in real milliseconds.
