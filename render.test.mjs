@@ -813,6 +813,13 @@ vm.runInContext(`{
   assert.ok(locked(tracks[1], 1), 'locked');
   autoplayStep(0.5); autoplayStep(1);
   assert.ok(tracks[1].notes.every(n => n.hit), 'hits the unlocked notes without waiting for the bar to change');
+
+  // A hold is held to its tail: the bot does not leave for a sooner track and break it.
+  setup([[20], [0.5], [1.2], [20]], 1); tracks[1].notes[0].len = 1;
+  autoplayStep(0.5); assert.equal(tracks[1].holds.length, 1, 'head hit, hold started');
+  autoplayStep(0.6); assert.equal(run.currentTrack, 1, 'stays on the holding track');
+  logic(1.6); assert.ok(tracks[1].notes[0].ended && !tracks[1].notes[0].broken, 'held to the tail');
+  autoplayStep(1.6); assert.notEqual(run.currentTrack, 1, 'then moves on');
 }`, context);
 console.log('ok: autoplay goes either way, leaves an empty track, finishes a phrase, pre-positions for a lock expiring and does not ping-pong');
 
