@@ -640,6 +640,46 @@ context.location = { href: 'https://game.example/lockstep/' };
 }
 console.log('ok: challenge links round-trip, set the level, show on the HUD and results, flag a different chart, and clear on the title');
 
+{
+  // Mastery on the sleeve: grades by level in the list and card, CLEAN, and untrusted stored records.
+  const texts = [], fillText = canvas.fillText;
+  canvas.fillText = (...args) => { fillText(...args); texts.push(args[0]); };
+  const count = text => texts.filter(t => t === text).length;
+  const drawTitleWith = (stored, lv) => {
+    texts.length = 0;
+    vm.runInContext(`catalog = [DEMO]; sel = 0; mode = 'title'; rt = 5; best = loadBest(${JSON.stringify(stored)}); level = ${lv}; drawList(); drawCard();`, context);
+  };
+  const stored = JSON.stringify({
+    'demo:0': { score: 100, grade: 'B' },
+    'demo:2': { score: 900, grade: 'S', clean: true, tracks: [1, .5, null, .9] },
+  });
+  drawTitleWith(stored, 0);
+  assert.equal(count('B'), 2, 'level 0: its grade in the list row and under its name on the card');
+  assert.equal(count('S'), 1, 'only the card shows the other level');
+  assert.equal(count('◆ CLEAN'), 0, 'today\'s shape is not clean');
+  drawTitleWith(stored, 2);
+  assert.equal(count('S'), 2, 'changing the level changes the list row');
+  assert.equal(count('B'), 1);
+  assert.equal(count('◆ CLEAN'), 1, 'a clean level is tagged on the card');
+  drawTitleWith(JSON.stringify({ 'demo:1': { score: 'x', grade: 5, clean: 'yes', tracks: 'nope' }, 'demo:0': { score: 100, grade: 'B', clean: 1, tracks: [5] } }), 1);
+  assert.deepEqual(texts.filter(t => /^[SABCD]$/.test(t)), ['B'], 'a wrong-typed record is dropped; the other keeps only its sound fields');
+  assert.equal(count('◆ CLEAN'), 0);
+  drawTitleWith('not json', 0);
+  assert.equal(vm.runInContext('Object.keys(best).length', context), 0, 'unreadable storage is empty');
+
+  // A completed run merges into the record; a failed run leaves it alone.
+  vm.runInContext(`{
+    best = loadBest(${JSON.stringify(stored)}); song = demoSong(); level = 0; playKey = 'demo'; reset();
+    run.score = 50; run.hits = 30; run.captures = 1; tracks[0].hits = 10; saveBest();
+    assert.equal(best['demo:0'].score, 100, 'a lower score keeps the old score'); assert.equal(newBest, false);
+    assert.equal(best['demo:0'].clean, true, 'but a clean run earns CLEAN'); assert.equal(best['demo:0'].tracks[0], 1);
+    const before = JSON.stringify(best); reset(); run.score = 99999; run.hits = 50; changeGroove(-1000);
+    assert.equal(mode, 'failed'); assert.equal(JSON.stringify(best), before, 'a failed run saves nothing');
+  }`, context);
+  canvas.fillText = fillText;
+}
+console.log('ok: mastery marks follow the level, CLEAN, wrong-typed records, run merging and failed runs');
+
 const beforeSnapshots = snapshots;
 vm.runInContext("mode = 'title'; scene.renderScene(1, false)", context);
 assert.equal(snapshots - beforeSnapshots, 1, 'one frame snapshot, including nested menu text calls');

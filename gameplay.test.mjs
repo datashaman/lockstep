@@ -20,6 +20,9 @@ import {
   recordEncoreStray,
   ENCORE_BARS,
   ENCORE_BONUS,
+  mergeBest,
+  sanitizeBest,
+  grade,
 } from "./lib/gameplay.js";
 const run = createRunState();
 const tracks = createTracks(
@@ -195,4 +198,47 @@ console.log(
   recordEncoreStray(r, 3);
   assert.deepEqual([r.multiplier, r.encoreVoid, r.groove, r.strays, r.misses], [1, 3, 80, 0, 0], "a stray voids the phrase and breaks the multiplier only");
   console.log("ok: encore hits double-score outside accuracy, extend every locked track and pass between tracks");
+}
+
+{
+  // Mastery: one record per song and level, merged run by run.
+  const mk = (...stats) => stats.map(([hits, misses]) => ({ hits, misses }));
+  const finished = (score, hits, misses, strays, captures) => ({ ...createRunState(), score, hits, misses, strays, captures });
+  assert.deepEqual([0.95, 0.85, 0.7, 0.5, 0.49].map(grade), ["S", "A", "B", "C", "D"], "thresholds unchanged");
+
+  const first = mergeBest(undefined, finished(1000, 30, 2, 1, 1), mk([10, 0], [8, 2], [7, 0], [0, 0]));
+  assert.deepEqual(first, { score: 1000, grade: "A", clean: false, tracks: [1, 0.8, null, null] }, "first run; 7 and 0 judged notes are too few");
+
+  const clean = mergeBest(first, finished(900, 40, 0, 0, 2), mk([10, 0], [12, 0], [10, 0], [0, 0]));
+  assert.deepEqual(
+    clean,
+    { score: 1000, grade: "A", clean: true, tracks: [1, 1, 1, null] },
+    "a lower score that is clean keeps score and grade, earns CLEAN and raises instruments",
+  );
+  const higher = mergeBest(clean, finished(1500, 15, 5, 3, 1), mk([4, 6], [8, 2], [5, 5], [0, 0]));
+  assert.deepEqual(higher, { score: 1500, grade: "C", clean: true, tracks: [1, 1, 1, null] }, "a higher, messier score replaces score and grade; clean and accuracies stay");
+
+  const lower = mergeBest(first, finished(500, 10, 10, 0, 1), mk([9, 1], [10, 0], [8, 0], [8, 0]));
+  assert.deepEqual(lower, { score: 1000, grade: "A", clean: false, tracks: [1, 1, 1, 1] }, "a lower score that raises instruments");
+  assert.equal(mergeBest(first, finished(500, 1, 0, 0, 0), mk([1, 0])).clean, false, "no capture is not clean");
+  assert.equal(mergeBest(undefined, finished(5, 8, 0, 0, 1), mk()).clean, true, "no misses, no strays and a capture");
+
+  // Stored JSON is untrusted: today's shape reads as not clean with no instrument data.
+  const stored = sanitizeBest({
+    "a:0": { score: 100, grade: "B" },
+    "a:1": { score: 5, grade: "S", clean: "yes", tracks: "nope" },
+    "a:2": { score: 5, grade: "S", clean: true, tracks: [0.5, null, 2] },
+    "a:3": { score: "x", grade: 5 },
+    "a:4": null,
+    "a:5": { score: -1, grade: "S" },
+    "a:6": { score: 9, grade: "S", clean: true, tracks: [0.5, null] },
+  });
+  assert.deepEqual(stored["a:0"], { score: 100, grade: "B", clean: false });
+  assert.deepEqual(stored["a:1"], { score: 5, grade: "S", clean: false });
+  assert.deepEqual(stored["a:2"], { score: 5, grade: "S", clean: true }, "out-of-range accuracies drop the instrument data");
+  assert.deepEqual(Object.keys(stored).sort(), ["a:0", "a:1", "a:2", "a:6"], "records with a bad score or grade are dropped");
+  assert.deepEqual(stored["a:6"].tracks, [0.5, null]);
+  assert.deepEqual(sanitizeBest("nonsense"), {});
+  assert.deepEqual(sanitizeBest(null), {});
+  console.log("ok: mergeBest keeps the best score, clean and per-instrument accuracy; stored records are validated");
 }
