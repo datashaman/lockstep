@@ -26,7 +26,9 @@ const context = vm.createContext({ ...appImports, assert, AudioContext, console,
 });
 vm.runInContext(source, context);
 vm.runInContext(`
-  initAudio(); const baselineEdges = countEdges();
+  initAudio(); assert.equal(globalThis.navigator, undefined, 'no navigator: nothing to declare');
+  navigator = { audioSession: { type: 'auto' } }; initAudio(); assert.equal(navigator.audioSession.type, 'playback', 'iOS: sound plays with the ringer switch on silent');
+  const baselineEdges = countEdges();
   song = { ...demoSong(), synth: false, buffers: [{}, {}, {}, {}] };
   for (let i = 0; i < 20; i++) reset();
   // Practice seeks restart the stems each time; the graph must not grow.
