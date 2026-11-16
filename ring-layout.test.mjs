@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { ringPosition } from './lib/ring-layout.js';
+assert.equal(ringPosition(0, 1, 10, 10), 0);
+assert.equal(ringPosition(0, 1, 10, 10.15), 1);
+const halfway = ringPosition(0, 1, 10, 10.075);
+assert.ok(halfway > 0 && halfway < 1);
+assert.equal(ringPosition(halfway, 0, 10.075, 10.075), halfway);
+assert.equal(ringPosition(halfway, 0, 10.075, 10.225), 0);
+assert.equal(ringPosition(0, 3, 10, 10, true), 3);
+console.log('ok: bounded rotation, continuous reversal, reduced motion');

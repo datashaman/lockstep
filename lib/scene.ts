@@ -25,6 +25,8 @@ export interface Popup {
   born: number;
 }
 export interface SceneFrame {
+  ring?: boolean;
+  ringPosition?: number;
   DPR: number;
   F: number;
   H: number;
