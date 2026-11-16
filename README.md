@@ -130,3 +130,9 @@ The dock also offers native song and difficulty selectors, Audius search, file i
 This is the landscape-tablet pass. Phone menus retain the scaled two-panel canvas; portrait shows landscape guidance. Real-device touch/audio latency and mobile stem-separation limits still need testing. Keep the browser foregrounded while importing a track.
 
 Run `node touch.test.mjs` for pointer, cancellation, shared input and calibration checks.
+
+### Ring layout prototype
+
+Open `?ring` to opt into the experimental tunnel layout. Notes approach ring segments from depth; left/right brings the selected instrument to the bottom. J/K/L keep their left-to-right order. A stationary bottom guide shows the selected notes during the 150 ms turn. Rapid switches retarget the current rotation. Reduced motion switches immediately. Selection still skips silent instruments, allows AUTO tracks, stops at the first/last track, and releases holds on a switch.
+
+For comparison, play the same song and difficulty with and without `?ring`; add `&autoplay&perf` to the ring URL (or `?autoplay&perf` for the highway) for repeatable rendering runs. Check incoming neighbouring notes, immediate hits during turns, rapid reversals, pause/resume, and hold visibility. Automated rendering checks cover 1920×1080 and 3840×2160 coordinates; physical TV/projector readability, motion comfort, and flow still need human play-testing. Orbiting and inside/outside inversion are not implemented.

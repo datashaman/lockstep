@@ -990,3 +990,46 @@ vm.runInContext(`
 `, context);
 console.log('ok: renderer accepts frozen gameplay state');
 
+
+// Opt-in ring: rotation is presentation only; selection and judgement remain immediate.
+{
+  let viewport = [800, 600];
+  calls = [];
+  const ringContext = vm.createContext({ ...context, ...appImports,
+    createSceneRenderer: (g, readFrame, document) => appImports.createSceneRenderer(g, () => ({ ...readFrame(), W: viewport[0], H: viewport[1], HIT_Y: viewport[1] * 5 / 6 }), document),
+  });
+  vm.runInContext(appSource.replace('const RING = !!flags?.has("ring");', 'const RING = true;'), ringContext);
+  vm.runInContext(`
+    ac = { currentTime: 0 }; audio = { playSwitch() {}, playNote() {}, playCapture() {}, stopSounds() {}, restoreVolume() {} };
+    song = demoSong(); reset(); rt = 20;
+    const originalTimes = tracks.map(tr => tr.notes.map(n => n.t));
+    const originalTempo = JSON.stringify(tempo);
+    const initial = run.currentTrack;
+    move(1); assert.equal(run.currentTrack, initial + 1);
+    assert.equal(ringNow(), initial);
+    rt += .075; const mid = ringNow(); assert.ok(mid > initial && mid < initial + 1);
+    move(-1); assert.equal(ringNow(), mid); assert.equal(run.currentTrack, initial);
+    rt += .15; assert.equal(ringNow(), initial);
+    move(-1); assert.equal(run.currentTrack, initial, 'no wrap at first track');
+    move(1);
+    const note = tracks[run.currentTrack].notes.find(n => !n.hit);
+    const hitsBefore = run.hits;
+    tryHit(note.lane, undefined, note.t);
+    assert.equal(run.hits, hitsBefore + 1, 'judgement does not wait for rotation');
+    assert.equal(JSON.stringify(tempo), originalTempo);
+    assert.deepEqual(tracks.map(tr => tr.notes.map(n => n.t)), originalTimes);
+    const stateBefore = JSON.stringify({ run, tracks });
+    draw(1, true);
+    assert.equal(JSON.stringify({ run, tracks }), stateBefore, 'drawing cannot mutate gameplay');
+    const frozen = ringNow(); draw(1, true); assert.equal(ringNow(), frozen, 'unchanged visual clock freezes rotation');
+    reset(); assert.equal(ringNow(), run.currentTrack, 'restart resets rotation');
+  `, ringContext);
+  assert.ok(calls.some(c => c[0] === 'fillText' && c[1] === 'PERFECT'), 'ring preserves timing feedback');
+  for (const size of [[1920,1080],[3840,2160]]) {
+    viewport = size; vm.runInContext('draw(1, true)', ringContext);
+  }
+  motion.matches = true;
+  vm.runInContext('move(1); assert.equal(ringNow(), run.currentTrack); draw(1, true)', ringContext);
+  motion.matches = false;
+}
+console.log('ok: ring immediate selection and hits, reversals, no wrap, reset, reduced motion, large viewport and pure rendering');

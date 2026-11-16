@@ -1,4 +1,5 @@
 // @ts-check
+import { ringPosition } from "./lib/ring-layout.js";
 /** @typedef {import('./lib/song').SongEntry} SongEntry */
 /** @typedef {import('./lib/song').SongChart} SongChart */
 /** @typedef {import('./lib/song').PlayableSong} PlayableSong */
@@ -383,6 +384,12 @@ let press = [-9, -9, -9],
 // separation steps on screen and keeps the log in localStorage, so the log of an
 // import that crashed the tab is still there after the reload.
 const flags = globalThis.location ? new URL(location.href).searchParams : null;
+const RING = !!flags?.has("ring");
+let ringFrom = 0,
+  ringTo = 0,
+  ringAt = 0;
+const ringNow = () =>
+  ringPosition(ringFrom, ringTo, ringAt, rt, reducedMotion?.matches);
 const PERF = !!flags?.has("perf"),
   AUTOPLAY = !!flags?.has("autoplay"),
   debugLog = flags?.has("debug") ? createDebugLog() : null;
@@ -538,6 +545,8 @@ function reset(menuImage = null) {
     0,
     tracks.findIndex((tr) => tr.notes.length),
   );
+  ringFrom = ringTo = run.currentTrack;
+  ringAt = rt;
   mode = "play";
   shown = 0;
   parts = [];
@@ -1307,6 +1316,9 @@ const next = (dir) => nextTrack(tracks, run.currentTrack, dir);
 function move(dir) {
   const j = next(dir);
   if (j < 0) return;
+  ringFrom = ringNow();
+  ringTo = j;
+  ringAt = rt;
   releaseHolds();
   dash = { from: craftX(), to: trackX(j), at: rt };
   audio.playSwitch(ac.currentTime);
@@ -3146,6 +3158,8 @@ function drawResults() {
 const scene = createSceneRenderer(
   g,
   () => ({
+    ring: RING,
+    ringPosition: ringNow(),
     DPR,
     F,
     H,
